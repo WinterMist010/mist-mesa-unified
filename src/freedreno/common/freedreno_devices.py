@@ -1399,14 +1399,14 @@ add_gpus([
             has_salu_int_narrowing_quirk = True,
             shading_rate_matches_vk = True,
         )],
-        num_ccu = 2,
+        num_ccu = 3, #was 1. in testing
         num_slices = 1,
         tile_align_w = 64,
         tile_align_h = 32,
         tile_max_w = 16384,
         tile_max_h = 16384,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 64 * 1024,
+        cs_shared_mem_size = 32 * 1024, #was 64. in testing.
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         magic_regs = dict(),
