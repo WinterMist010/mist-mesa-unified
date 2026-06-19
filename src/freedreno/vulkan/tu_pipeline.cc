@@ -1747,7 +1747,7 @@ tu_pipeline_builder_compile_shaders(struct tu_pipeline_builder *builder,
    const bool is_a810 = chip_id == 0x44010000ull;
    const bool is_a825 = chip_id == 0x44030000ull;
    const bool is_a829 = chip_id == 0x44030A20ull;
-   const bool is_a830 = chip_id == 0xffff44050000 || 0x44050001;
+   const bool is_a830 = chip_id == 0xffff44050000 || chip_id == 0x44050001;
    const bool is_target_gpu = is_a810 || is_a825 || is_a829 || is_a830;
 
    const bool executable_info =
@@ -3244,8 +3244,28 @@ tu6_calc_blend_lrz(const struct vk_color_blend_state *cb,
          continue;
 
       const struct vk_color_blend_attachment_state *att = &cb->attachments[i];
-      if (att->blend_enable)
-         return TU_LRZ_BLEND_READS_DEST_OR_PARTIAL_WRITE;
+      if (att->blend_enable) {
+         /* Blending that's equivalent to a plain replace (dst = src) doesn't
+          * actually read the destination, so it's still safe for LRZ. Check
+          * both the color and (if the format has one) alpha channel, since
+          * they have independent op/factors.
+          */
+         bool is_replace =
+            tu6_blend_op(att->color_blend_op) == BLEND_OP_ADD &&
+            tu6_blend_factor((VkBlendFactor)att->src_color_blend_factor) == FACTOR_ONE &&
+            tu6_blend_factor((VkBlendFactor)att->dst_color_blend_factor) == FACTOR_ZERO;
+
+         if (is_replace &&
+             vk_format_get_nr_components(rp->color_attachment_formats[i]) == 4) {
+            is_replace =
+               tu6_blend_op(att->alpha_blend_op) == BLEND_OP_ADD &&
+               tu6_blend_factor((VkBlendFactor)att->src_alpha_blend_factor) == FACTOR_ONE &&
+               tu6_blend_factor((VkBlendFactor)att->dst_alpha_blend_factor) == FACTOR_ZERO;
+         }
+
+         if (!is_replace)
+            return TU_LRZ_BLEND_READS_DEST_OR_PARTIAL_WRITE;
+      }
       if (!(cb->color_write_enables & (1u << i)))
          return TU_LRZ_BLEND_READS_DEST_OR_PARTIAL_WRITE;
       unsigned mask =
