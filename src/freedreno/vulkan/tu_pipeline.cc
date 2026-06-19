@@ -3251,14 +3251,14 @@ tu6_calc_blend_lrz(const struct vk_color_blend_state *cb,
           * they have independent op/factors.
           */
          bool is_replace =
-            tu6_blend_op(att->color_blend_op) == BLEND_OP_ADD &&
+            tu6_blend_op(att->color_blend_op) == DST_PLUS_SRC &&
             tu6_blend_factor((VkBlendFactor)att->src_color_blend_factor) == FACTOR_ONE &&
             tu6_blend_factor((VkBlendFactor)att->dst_color_blend_factor) == FACTOR_ZERO;
 
          if (is_replace &&
              vk_format_get_nr_components(rp->color_attachment_formats[i]) == 4) {
             is_replace =
-               tu6_blend_op(att->alpha_blend_op) == BLEND_OP_ADD &&
+               tu6_blend_op(att->alpha_blend_op) == DST_PLUS_SRC &&
                tu6_blend_factor((VkBlendFactor)att->src_alpha_blend_factor) == FACTOR_ONE &&
                tu6_blend_factor((VkBlendFactor)att->dst_alpha_blend_factor) == FACTOR_ZERO;
          }
