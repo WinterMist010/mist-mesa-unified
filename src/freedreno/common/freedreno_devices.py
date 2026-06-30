@@ -1404,7 +1404,7 @@ add_gpus([
             has_salu_int_narrowing_quirk = True,
             shading_rate_matches_vk = True,
         )],
-        num_ccu = 2, # Experimental: test whether A810 exposes two CCU/SP cores.
+        num_ccu = 2, # Experimental: Based on testing it infact does have 2 CCU/SP cores. Although i have not completly ruled out errors
         num_slices = 1,
         tile_align_w = 64,
         tile_align_h = 32,
