@@ -1394,9 +1394,9 @@ add_gpus([
             gmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
             gmem_per_ccu_depth_cache_size = 24 * 1024,
             
-            gmem_vpc_attr_buf_size = 8192,
-            gmem_vpc_pos_buf_size = 6144,
-            gmem_vpc_bv_pos_buf_size = 10240,
+            gmem_vpc_attr_buf_size = 16384,
+            gmem_vpc_pos_buf_size = 12288,
+            gmem_vpc_bv_pos_buf_size = 20480,
 
             gmem_size = 576 * 1024,
             has_ray_intersection = False,
