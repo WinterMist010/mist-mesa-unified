@@ -1381,14 +1381,9 @@ add_gpus([
             sysmem_vpc_pos_buf_size = 65536,
             sysmem_vpc_bv_pos_buf_size = 32768,
             sysmem_ccu_color_cache_fraction = CCUColorCacheFraction.FULL.value,
-            # Experimental A810 2-CCU probe: keep the aggregate cache/VPC
-            # reservations equivalent to the known-stable 1-CCU layout below.
-            # If num_ccu=2 still fails with these per-CCU sizes halved, the
-            # failure is more likely from exposing a second CCU/SP core than
-            # from simply doubling the reserved GMEM/sysmem regions.
-            sysmem_per_ccu_color_cache_size = 32 * 1024,
+            sysmem_per_ccu_color_cache_size = 128 * 1024,
             sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.THREE_QUARTER.value,
-            sysmem_per_ccu_depth_cache_size = 32 * 1024,
+            sysmem_per_ccu_depth_cache_size = 96 * 1024,
             gmem_ccu_color_cache_fraction = CCUColorCacheFraction.EIGHTH.value,
             gmem_per_ccu_color_cache_size = 32 * 1024,
             gmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
