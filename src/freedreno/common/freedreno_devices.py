@@ -1377,9 +1377,9 @@ add_gpus([
     ], A6xxGPUInfo(
         CHIP.A8XX,
         [a7xx_base, a7xx_gen3, a8xx_base, a8xx_gen1, GPUProps(
-            sysmem_vpc_attr_buf_size = 131072, 
-            sysmem_vpc_pos_buf_size = 65536,
-            sysmem_vpc_bv_pos_buf_size = 32768,
+            sysmem_vpc_attr_buf_size = 262144, 
+            sysmem_vpc_pos_buf_size = 131072,
+            sysmem_vpc_bv_pos_buf_size = 65536,
             sysmem_ccu_color_cache_fraction = CCUColorCacheFraction.FULL.value,
             sysmem_per_ccu_color_cache_size = 32 * 1024,
             sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.THREE_QUARTER.value,
@@ -1396,13 +1396,13 @@ add_gpus([
             gmem_size = 576 * 1024,
             has_ray_intersection = False,
             has_sw_fuse = False,
-            has_fs_tex_prefetch = True,#check to see if its still brokem
+            has_fs_tex_prefetch = False,#infacts still broken
             has_salu_int_narrowing_quirk = True,
             shading_rate_matches_vk = True,
             enable_tp_ubwc_flag_hint = True,
         )],
-        num_ccu = 2, # Experimental: Based on testing it infact does have 2 CCU/SP cores. Although i have not completly ruled out errors
-        num_slices = 1,
+        num_ccu = 2, # Experimental: Based on testing it infact does have 2 CCU/SP cores
+        num_slices = 1
         tile_align_w = 64,
         tile_align_h = 32,
         tile_max_w = 16384,
