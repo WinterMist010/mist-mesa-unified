@@ -1399,6 +1399,7 @@ add_gpus([
             has_fs_tex_prefetch = False,
             has_salu_int_narrowing_quirk = True,
             shading_rate_matches_vk = True,
+            enable_tp_ubwc_flag_hint = True,
         )],
         num_ccu = 2, # Experimental: Based on testing it infact does have 2 CCU/SP cores. Although i have not completly ruled out errors
         num_slices = 1,
