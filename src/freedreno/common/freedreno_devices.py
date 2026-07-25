@@ -1402,7 +1402,7 @@ add_gpus([
             enable_tp_ubwc_flag_hint = True,
         )],
         num_ccu = 2, # Experimental: Based on testing it infact does have 2 CCU/SP cores
-        num_slices = 1
+        num_slices = 1,
         tile_align_w = 64,
         tile_align_h = 32,
         tile_max_w = 16384,
