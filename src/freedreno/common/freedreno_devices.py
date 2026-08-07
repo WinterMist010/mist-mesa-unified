@@ -1478,7 +1478,7 @@ add_gpus([
             has_salu_int_narrowing_quirk = True,
             shading_rate_matches_vk = True,
         )],
-        num_ccu = 1,
+        num_ccu = 2,
         num_slices = 1,
         tile_align_w = 64,
         tile_align_h = 32,
