@@ -1456,7 +1456,7 @@ a8xx_810 = GPUProps(
     # Sysmem CCU cache sizing tuned to prevent integer underflows in Freedreno tiling calculations
     sysmem_ccu_color_cache_fraction = CCUColorCacheFraction.FULL.value,
     sysmem_per_ccu_color_cache_size = 32 * 1024,
-    sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.THREE_QUARTER.value,
+    sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
     sysmem_per_ccu_depth_cache_size = 32 * 1024,
 
     # GMEM VPC buffer layout (expanded from the bottlenecked 16K/12K/20K)
