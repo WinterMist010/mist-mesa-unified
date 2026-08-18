@@ -1447,6 +1447,42 @@ a8xx_gen2 = GPUProps(
         has_salu_int_narrowing_quirk = True
 )
 
+a8xx_810 = GPUProps(
+    # Sysmem VPC buffer layout (standardized across Gen8 for vertex reuse)
+    sysmem_vpc_attr_buf_size = 131072,  # 128 KiB
+    sysmem_vpc_pos_buf_size  = 65536,   # 64 KiB
+    sysmem_vpc_bv_pos_buf_size = 32768, # 32 KiB
+
+    # Sysmem CCU cache sizing tuned to prevent integer underflows in Freedreno tiling calculations
+    sysmem_ccu_color_cache_fraction = CCUColorCacheFraction.FULL.value,
+    sysmem_per_ccu_color_cache_size = 32 * 1024,
+    sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.THREE_QUARTER.value,
+    sysmem_per_ccu_depth_cache_size = 32 * 1024,
+
+    # GMEM VPC buffer layout (expanded from the bottlenecked 16K/12K/20K)
+    gmem_vpc_attr_buf_size   = 49152,   # 48 KiB
+    gmem_vpc_pos_buf_size    = 24576,   # 24 KiB
+    gmem_vpc_bv_pos_buf_size = 32768,   # 32 KiB
+
+    # GMEM CCU cache fractions matching A810 hardware cache partitions
+    gmem_ccu_color_cache_fraction = CCUColorCacheFraction.EIGHTH.value,
+    gmem_per_ccu_color_cache_size = 16 * 1024,
+    gmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
+    gmem_per_ccu_depth_cache_size = 64 * 1024,
+
+    # Hardware capabilities & feature toggles
+    gmem_size = 576 * 1024,               # 576 KiB dedicated GMEM
+    has_ray_intersection = False,         # A810 lacks HW BVH/Ray-Tracing units
+    has_sw_fuse = False,                  # Disable SW fuse workaround not applicable to A810
+    has_fs_tex_prefetch = False,          # Disabled: prevents texture sampler artifacts/hangs
+    has_salu_int_narrowing_quirk = True,  # Fixes A8xx SALU integer narrowing errata
+    shading_rate_matches_vk = True,       # Proper VRS mapping for Vulkan 1.3
+    enable_tp_ubwc_flag_hint = True,      # Fixes UBWC texture corruption and screen artifacts
+
+    # Set to True if gmem breaks. probably not needed.
+    # disable_gmem = False,
+)
+
 add_gpus([
        GPUId(chip_id=0xffff44010000, name="Adreno (TM) 810"),
        GPUId(chip_id=0xffff44010200, name="Adreno (TM) 812"),
@@ -1454,33 +1490,10 @@ add_gpus([
        GPUId(chip_id=0x44010200, name="Adreno (TM) 812"), # KGSL
     ], A6xxGPUInfo(
         CHIP.A8XX,
-        [a7xx_base, a7xx_gen3, a8xx_base, a8xx_gen1, GPUProps(
-            sysmem_vpc_attr_buf_size = 131072, 
-            sysmem_vpc_pos_buf_size = 65536,
-            sysmem_vpc_bv_pos_buf_size = 32768,
-            sysmem_ccu_color_cache_fraction = CCUColorCacheFraction.FULL.value,
-            sysmem_per_ccu_color_cache_size = 32 * 1024,
-            sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
-            sysmem_per_ccu_depth_cache_size = 32 * 1024,
-            gmem_ccu_color_cache_fraction = CCUColorCacheFraction.EIGHTH.value,
-            gmem_per_ccu_color_cache_size = 16 * 1024,
-            gmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
-            gmem_per_ccu_depth_cache_size = 24 * 1024,
-            
-            gmem_vpc_attr_buf_size = 16384,
-            gmem_vpc_pos_buf_size = 12288,
-            gmem_vpc_bv_pos_buf_size = 20480,
-
-            gmem_size = 576 * 1024,
-            has_ray_intersection = False,
-            has_sw_fuse = False,
-            has_fs_tex_prefetch = False,
-            has_salu_int_narrowing_quirk = True,
-            shading_rate_matches_vk = True,
-        )],
+        [a7xx_base, a7xx_gen3, a8xx_base, a8xx_810],
         num_ccu = 2,
         num_slices = 1,
-        tile_align_w = 64,
+        tile_align_w = 96,
         tile_align_h = 32,
         tile_max_w = 16384,
         tile_max_h = 16384,
