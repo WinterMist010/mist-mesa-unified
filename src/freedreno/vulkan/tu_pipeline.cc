@@ -1743,13 +1743,17 @@ tu_pipeline_builder_compile_shaders(struct tu_pipeline_builder *builder,
    };
    VkPipelineCreationFeedback stage_feedbacks[MESA_SHADER_STAGES] = { 0 };
 
-   const uint64_t chip_id = builder->device->physical_device->dev_id.chip_id;
-   const bool is_a810 = chip_id == 0x44010000ull;
-   const bool is_a825 = chip_id == 0x44030000ull;
-   const bool is_a829 = chip_id == 0x44030A20ull;
-   const bool is_a830 = chip_id == 0xffff44050000 || 0x44050001;
-   const bool is_target_gpu = is_a810 || is_a825 || is_a829 || is_a830;
+   const struct fd_dev_id *dev_id = &builder->device->physical_device->dev_id;
+const uint64_t chip_id = dev_id->chip_id;
 
+const bool is_a810 = (chip_id == 0x44010000ull) || (dev_id->gpu_id == 810);
+const bool is_a812 = (chip_id == 0x44010200ull) || (chip_id == 0x44010100ull) || (dev_id->gpu_id == 812);
+const bool is_a825 = (chip_id == 0x44030000ull) || (dev_id->gpu_id == 825);
+const bool is_a829 = (chip_id == 0x44030A20ull) || (dev_id->gpu_id == 829);
+const bool is_a830 = (chip_id == 0xffff44050000ull) || (chip_id == 0x44050000ull) || 
+                     (chip_id == 0x44050001ull)     || (dev_id->gpu_id == 830);
+
+const bool is_target_gpu = is_a810 || is_a812 || is_a825 || is_a829 || is_a830;
    const bool executable_info =
       builder->create_flags &
       VK_PIPELINE_CREATE_2_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
