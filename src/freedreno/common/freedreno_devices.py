@@ -1468,7 +1468,7 @@ a8xx_810 = GPUProps(
     gmem_ccu_color_cache_fraction = CCUColorCacheFraction.EIGHTH.value,
     gmem_per_ccu_color_cache_size = 16 * 1024,
     gmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
-    gmem_per_ccu_depth_cache_size = 64 * 1024,
+    gmem_per_ccu_depth_cache_size = 32 * 1024,
 
     # Hardware capabilities & feature toggles
     gmem_size = 576 * 1024,               # 576 KiB dedicated GMEM
@@ -1502,6 +1502,7 @@ add_gpus([
         cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
+        highest_bank_bit = 16
         magic_regs = dict(),
         raw_magic_regs = a8xx_base_raw_magic_regs,
     ))
