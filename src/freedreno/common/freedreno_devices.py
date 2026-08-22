@@ -1502,7 +1502,7 @@ add_gpus([
         cs_shared_mem_size = 64 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
-        highest_bank_bit = 16
+        highest_bank_bit = 16,
         magic_regs = dict(),
         raw_magic_regs = a8xx_base_raw_magic_regs,
     ))
