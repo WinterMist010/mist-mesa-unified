@@ -1478,6 +1478,7 @@ a8xx_810 = GPUProps(
     has_salu_int_narrowing_quirk = True,  # Fixes A8xx SALU integer narrowing errata
     shading_rate_matches_vk = True,       # Proper VRS mapping for Vulkan 1.3
     enable_tp_ubwc_flag_hint = True,      # Fixes UBWC texture corruption and screen artifacts
+    max_samples = 4                       # Max MSAA samples
 
     # Set to True if gmem breaks. probably not needed.
     # disable_gmem = False,
