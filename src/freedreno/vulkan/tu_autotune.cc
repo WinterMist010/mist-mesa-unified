@@ -1025,7 +1025,10 @@ struct tu_autotune::rp_history {
                                    const struct tu_cmd_state *cmd_state,
                                    const struct tu_render_pass *pass,
                                    const struct tu_framebuffer *framebuffer,
-                                   const struct tu_render_pass_state *rp_state)
+                                   const struct tu_render_pass_state *rp_state,
+                                   uint32_t tile_count,
+                                   uint32_t gmem_tile_overhead_bytes,
+                                   uint32_t gmem_margin_percent)
       {
          uint32_t pass_pixel_count = 0;
          if (cmd_state->per_layer_render_area) {
@@ -1041,6 +1044,18 @@ struct tu_autotune::rp_history {
 
          uint64_t sysmem_bandwidth = (uint64_t) pass->sysmem_bandwidth_per_pixel * pass_pixel_count;
          uint64_t gmem_bandwidth = (uint64_t) pass->gmem_bandwidth_per_pixel * pass_pixel_count;
+
+         /* On chips with a small dedicated GMEM (e.g. A810), the number of
+          * tiles required to render a pass is drastically higher than on
+          * large-GMEM parts (~30+ tiles for a 1080p MSAA target vs
+          * single-digit on A750).  Every tile carries fixed costs which the
+          * per-pixel bandwidth model cannot capture: CP state changes, cache
+          * flushes, subpass barriers and less effective draw batching.  When
+          * a device opts in via props, charge an amount of equivalent memory
+          * traffic per tile against the GMEM estimate.
+          */
+         if (gmem_tile_overhead_bytes && tile_count)
+            gmem_bandwidth += (uint64_t) gmem_tile_overhead_bytes * tile_count;
 
          uint64_t total_draw_call_bandwidth = 0;
          uint64_t mean_samples = mean_samples_passed.get();
@@ -1063,18 +1078,25 @@ struct tu_autotune::rp_history {
           */
          gmem_bandwidth = (gmem_bandwidth * 11 + total_draw_call_bandwidth) / 10;
 
-         bool select_sysmem = sysmem_bandwidth <= gmem_bandwidth;
+         /* The model's GMEM per-pixel estimate is optimistic, since the
+          * per-tile cache flushing / command overhead scaling is hard to
+          * model precisely, and the error is larger the smaller the GMEM.
+          * When a device opts in via props (gmem_margin_percent, clamped to
+          * >= 100 at construction), require GMEM to be that much cheaper
+          * than SYSMEM before selecting it.
+          */
+         bool select_sysmem = sysmem_bandwidth * 100 <= gmem_bandwidth * gmem_margin_percent;
          render_mode mode = select_sysmem ? render_mode::SYSMEM : render_mode::GMEM;
 
          UNUSED const VkExtent2D &extent = cmd_state->render_areas[0].extent;
          at_log_bandwidth_h(
             "%" PRIu32 " selecting %s\n"
             "   mean_samples=%" PRIu64 ", draw_bandwidth_per_sample=%.2f, total_draw_call_bandwidth=%" PRIu64
-            ", render_areas[0]=%" PRIu32 "x%" PRIu32 ", sysmem_bandwidth_per_pixel=%" PRIu32
+            ", render_areas[0]=%" PRIu32 "x%" PRIu32 ", tile_count=%" PRIu32 ", sysmem_bandwidth_per_pixel=%" PRIu32
             ", gmem_bandwidth_per_pixel=%" PRIu32 ", sysmem_bandwidth=%" PRIu64 ", gmem_bandwidth=%" PRIu64,
             history.hash, rp_state->drawcall_count, render_mode_str(mode), mean_samples,
             (float) rp_state->drawcall_bandwidth_per_sample_sum / rp_state->drawcall_count, total_draw_call_bandwidth,
-            extent.width, extent.height, pass->sysmem_bandwidth_per_pixel, pass->gmem_bandwidth_per_pixel,
+            extent.width, extent.height, tile_count, pass->sysmem_bandwidth_per_pixel, pass->gmem_bandwidth_per_pixel,
             sysmem_bandwidth, gmem_bandwidth);
 
          return mode;
@@ -1663,6 +1685,15 @@ tu_autotune::on_submit(struct tu_cmd_buffer **cmd_buffers, uint32_t cmd_buffer_c
 tu_autotune::tu_autotune(struct tu_device *device, VkResult &result)
     : device(device), supported_mod_flags(get_supported_mod_flags(device)), active_config(get_env_config())
 {
+   /* Source the small-GMEM tuning knobs from the physical device props, if
+    * configured.  Zero/100/zero default => no behavior change. */
+   const struct fd_dev_info *info = device->physical_device->info;
+   gmem_tile_overhead_bytes = info->props.autotune_gmem_tile_overhead_bytes;
+   gmem_margin_percent = info->props.autotune_gmem_margin_percent;
+   if (gmem_margin_percent < 100)
+      gmem_margin_percent = 100; /* Clamp: below 100 would bias towards GMEM. */
+   max_tile_count_big_gmem = info->props.autotune_max_tile_count_big_gmem;
+
    tu_bo_suballocator_init(&suballoc, device, 128 * 1024, TU_BO_ALLOC_INTERNAL_RESOURCE, "autotune_suballoc");
 
    if (supports_preempt_latency_tracking()) {
@@ -1792,6 +1823,16 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
    cmd_buf_ctx &cb_ctx = cmd_buffer->autotune_ctx;
    config_t config = active_config.load();
 
+   /* The GMEM tiling for this render pass is chosen in tu_choose_gmem_layout()
+    * before we get here, so we know exactly how many tiles a GMEM render of
+    * this pass would require.  This matters on small-GMEM dies, where the
+    * tile count can be large enough to dominate the SYSMEM/GMEM tradeoff.
+    */
+   uint32_t tile_count = 0;
+   if (cmd_state->tiling && cmd_state->tiling->possible)
+      tile_count = cmd_state->tiling->vsc.tile_count.width *
+                   cmd_state->tiling->vsc.tile_count.height;
+
    /* Just to ensure a segfault for accesses, in case we don't set it. */
    *rp_ctx = nullptr;
 
@@ -1856,8 +1897,15 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
     */
    bool can_early_return = !config.test(mod_flag::PREEMPT_OPTIMIZE);
    auto early_return_mode = [&]() -> std::optional<render_mode> {
-      if ((config.test(mod_flag::BIG_GMEM) && rp_state->drawcall_count >= 10) ||
-          config.is_enabled(algorithm::PREFER_GMEM))
+      /* The BIG_GMEM flag forces GMEM for RPs with >= 10 draws, but on
+       * small-GMEM dies that can mean an already ~30+ tile render.  When a
+       * max-tile-count cap is configured, fall through to the regular
+       * estimation instead of forcing GMEM blindly.
+       */
+      bool big_gmem_applicable =
+         config.test(mod_flag::BIG_GMEM) && rp_state->drawcall_count >= 10 &&
+         (max_tile_count_big_gmem == 0 || tile_count <= max_tile_count_big_gmem);
+      if (big_gmem_applicable || config.is_enabled(algorithm::PREFER_GMEM))
          return render_mode::GMEM;
       if (config.is_enabled(algorithm::PREFER_SYSMEM))
          return render_mode::SYSMEM;
@@ -1917,7 +1965,8 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
       return history.profiled.get_optimal_mode(history);
 
    if (config.is_enabled(algorithm::BANDWIDTH))
-      return history.bandwidth.get_optimal_mode(history, cmd_state, pass, framebuffer, rp_state);
+      return history.bandwidth.get_optimal_mode(history, cmd_state, pass, framebuffer, rp_state,
+                                                tile_count, gmem_tile_overhead_bytes, gmem_margin_percent);
 
    return default_mode;
 }

@@ -1500,10 +1500,11 @@ tu6_emit_bin_size_gmem(struct tu_cmd_buffer *cmd,
       tiling->tile0.height * gmem_extent.height : 0,
       {
          .render_mode = RENDERING_PASS,
-         .force_lrz_write_dis = !phys_dev->info->props.has_lrz_feedback,
+         .force_lrz_write_dis =
+            !phys_dev->info->props.has_lrz_feedback || TU_DEBUG(NOLRZFB),
          .buffers_location = buffers_location,
          .lrz_feedback_zmode_mask =
-            phys_dev->info->props.has_lrz_feedback
+            (phys_dev->info->props.has_lrz_feedback && !TU_DEBUG(NOLRZFB))
                ? (hw_binning ? LRZ_FEEDBACK_EARLY_Z_OR_EARLY_Z_LATE_Z :
                   LRZ_FEEDBACK_EARLY_Z_LATE_Z)
                : LRZ_FEEDBACK_NONE,
@@ -3263,10 +3264,12 @@ tu6_sysmem_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
    tu6_emit_bin_size<CHIP>(cs, 0, 0, {
       .render_mode = RENDERING_PASS,
       .force_lrz_write_dis =
-         !cmd->device->physical_device->info->props.has_lrz_feedback,
+         !cmd->device->physical_device->info->props.has_lrz_feedback ||
+         TU_DEBUG(NOLRZFB),
       .buffers_location = BUFFERS_IN_SYSMEM,
       .lrz_feedback_zmode_mask =
-         cmd->device->physical_device->info->props.has_lrz_feedback
+         (cmd->device->physical_device->info->props.has_lrz_feedback &&
+          !TU_DEBUG(NOLRZFB))
             ? LRZ_FEEDBACK_EARLY_Z_OR_EARLY_Z_LATE_Z
             : LRZ_FEEDBACK_NONE,
    });
@@ -3566,7 +3569,8 @@ tu6_tile_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
                                  .render_mode = BINNING_PASS,
                                  .buffers_location = BUFFERS_IN_GMEM,
                                  .lrz_feedback_zmode_mask =
-                                    phys_dev->info->props.has_lrz_feedback
+                                    (phys_dev->info->props.has_lrz_feedback &&
+                                     !TU_DEBUG(NOLRZFB))
                                        ? LRZ_FEEDBACK_EARLY_Z_LATE_Z
                                        : LRZ_FEEDBACK_NONE
                               });

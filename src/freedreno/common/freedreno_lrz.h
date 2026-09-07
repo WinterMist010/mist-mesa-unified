@@ -188,4 +188,18 @@ struct PACKED fd_lrzfc_layout<A8XX> {
    } compmaskidx[2];
 };
 
+static_assert(sizeof(fd_lrzfc_layout<A8XX>) == 0x7f40);
+static_assert(offsetof(fd_lrzfc_layout<A8XX>, fc1) == 0x0);
+static_assert(offsetof(fd_lrzfc_layout<A8XX>, fc2) == 0x1000);
+static_assert(offsetof(fd_lrzfc_layout<A8XX>, metadata) == 0x2000);
+/* Each metadata buffer[] element is 1024 bytes (64 bytes of fields +
+ * 960 bytes of padding per slice), so the BV/BR current-buffer indices
+ * come after both 1k blocks.
+ */
+static_assert(offsetof(fd_lrzfc_layout<A8XX>, buffer[1]) == 0x2400);
+static_assert(offsetof(fd_lrzfc_layout<A8XX>, buffer[0].depth_clear_val) == 0x2038);
+static_assert(offsetof(fd_lrzfc_layout<A8XX>, buffer[1].depth_clear_val) == 0x2438);
+static_assert(offsetof(fd_lrzfc_layout<A8XX>, bv_cur_buffer) == 0x2800);
+static_assert(offsetof(fd_lrzfc_layout<A8XX>, br_cur_buffer) == 0x2c00);
+
 #endif

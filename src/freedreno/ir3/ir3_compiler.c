@@ -436,6 +436,10 @@ ir3_compiler_create(struct fd_device *dev, const struct fd_dev_id *dev_id,
    compiler->nir_options = ir3_base_options;
    compiler->nir_options.has_iadd3 = dev_info->props.has_sad;
 
+   /* Device-specific limit on MSAA samples (0 = default of 4): */
+   if (dev_info->props.max_samples)
+      compiler->nir_options.max_samples = dev_info->props.max_samples;
+
    if (compiler->gen >= 6) {
       compiler->nir_options.force_indirect_unrolling = nir_var_all,
       compiler->nir_options.lower_device_index_to_zero = true;

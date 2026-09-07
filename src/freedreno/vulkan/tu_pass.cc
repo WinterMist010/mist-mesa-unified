@@ -887,10 +887,20 @@ tu_render_pass_bandwidth_config(struct tu_render_pass *pass)
       if (att->clear_mask)
          pass->sysmem_bandwidth_per_pixel += att->cpp;
 
-      /* approximate tu6_emit_sysmem_resolves */
+      /* approximate tu6_emit_sysmem_resolves.  The resolve reads the
+       * (multi-sample) framebuffer and writes the resolved single-sample
+       * output against whichever memory holds the framebuffer, so it must be
+       * charged to the GMEM path as well as the SYSMEM path: previously only
+       * SYSMEM was charged, which systematically biased the autotuner's
+       * bandwidth comparison towards GMEM in the presence of multisample
+       * resolves -- particularly misleading for small-GMEM dies where the
+       * tile count is already high.
+       */
       if (att->will_be_resolved) {
-         pass->sysmem_bandwidth_per_pixel +=
+         uint32_t resolve_cost =
             att->cpp + att->cpp / att->samples;
+         pass->sysmem_bandwidth_per_pixel += resolve_cost;
+         pass->gmem_bandwidth_per_pixel += resolve_cost;
       }
    }
 }

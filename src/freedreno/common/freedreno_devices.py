@@ -1478,7 +1478,22 @@ a8xx_810 = GPUProps(
     has_salu_int_narrowing_quirk = True,  # Fixes A8xx SALU integer narrowing errata
     shading_rate_matches_vk = True,       # Proper VRS mapping for Vulkan 1.3
     enable_tp_ubwc_flag_hint = True,      # Fixes UBWC texture corruption and screen artifacts
-    # max_samples = 4                       # Max MSAA samples. Apparently doesn't exist on this fork? Investigate later.
+    max_samples = 4,                      # Max MSAA samples (fd_dev_info.props.max_samples; consumed by turnip + ir3)
+
+    # Autotuner tuning for the 576 KiB dedicated GMEM.  The usable GMEM after
+    # CCU/VPC reservations is only ~272 KiB (~24 KiB gmem blocks at 96x32
+    # tile alignment), which means common 1080p multisample render targets
+    # end up with ~30+ GMEM tiles (vs single-digit on A750).  Tell the
+    # autotuner to charge a per-tile overhead against GMEM bandwidth and to
+    # require GMEM to be meaningfully cheaper before selecting it, otherwise
+    # the raw per-pixel model systematically overestimates GMEM wins.
+    #   - 4096 B/tile initial calibration: roughly a tile's worth of
+    #     state-change/flush traffic; tune with fpv regressions.
+    #   - 120% margin: require GMEM to be at least 20% cheaper.
+    #   - Restrict BIG_GMEM (force-GMEM >= 10 draws) to low tile counts.
+    autotune_gmem_tile_overhead_bytes = 4096,
+    autotune_gmem_margin_percent = 120,
+    autotune_max_tile_count_big_gmem = 12,
 
     # Set to True if gmem breaks. probably not needed.
     # disable_gmem = False,

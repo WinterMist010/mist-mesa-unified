@@ -58,6 +58,10 @@ static const struct debug_control tu_debug_options[] = {
    { "forcecb", TU_DEBUG_FORCE_CONCURRENT_BINNING },
    { "computeroundrobin", TU_DEBUG_COMPUTE_ROUND_ROBIN },
    { "deck_emu", TU_DEBUG_DECK_EMU },
+   { "nolrzflip", TU_DEBUG_NOLRZFLIP },
+   { "noclearlrzres", TU_DEBUG_NOCLEARLRZRES },
+   { "nolrzclear", TU_DEBUG_NOLRZCLEAR },
+   { "nolrzfb", TU_DEBUG_NOLRZFB },
    { NULL, 0 }
 };
 
@@ -70,6 +74,8 @@ static const struct debug_control tu_debug_options[] = {
 const uint64_t tu_runtime_debug_flags =
    TU_DEBUG_NIR | TU_DEBUG_NOBIN | TU_DEBUG_SYSMEM | TU_DEBUG_GMEM |
    TU_DEBUG_FORCEBIN | TU_DEBUG_LAYOUT | TU_DEBUG_NOLRZ | TU_DEBUG_NOLRZFC |
+   TU_DEBUG_NOLRZFLIP | TU_DEBUG_NOCLEARLRZRES | TU_DEBUG_NOLRZCLEAR |
+   TU_DEBUG_NOLRZFB |
    TU_DEBUG_PERF | TU_DEBUG_FLUSHALL | TU_DEBUG_SYNCDRAW |
    TU_DEBUG_RAST_ORDER | TU_DEBUG_UNALIGNED_STORE |
    TU_DEBUG_LOG_SKIP_GMEM_OPS | TU_DEBUG_3D_LOAD | TU_DEBUG_FDM |

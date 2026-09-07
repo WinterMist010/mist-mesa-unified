@@ -503,6 +503,44 @@ struct fd_dev_info {
 
       /* GMEM size in bytes */
       uint32_t gmem_size;
+
+      /* Maximum supported number of MSAA samples.  0 means to use the
+       * driver default (currently 4).  Note that the drivers currently
+       * only implement up to 4x MSAA, so values >4 will not be advertised
+       * by turnip.
+       */
+      uint32_t max_samples;
+
+      /* Autotuner tuning knobs.  These allow the autotuner to account for
+       * dies with a small dedicated GMEM (like A810/812's 576 KiB), where
+       * the high tile count induced by the small GMEM significantly changes
+       * the SYSMEM/GMEM tradeoff.  The zero / default values are no-ops so
+       * that devices which do not opt in behave exactly as before.
+       *
+       * autotune_gmem_tile_overhead_bytes: The estimated cost, in bytes of
+       *   equivalent memory traffic, of the fixed per-tile overhead (CP state
+       *   changes, cache flushes, subpass barriers, less effective draw
+       *   batching) incurred for each GMEM tile rendered, on top of the raw
+       *   per-pixel bandwidth charged by the bandwidth autotune algorithm.
+       *   0 disables the charge.
+       *
+       * autotune_gmem_margin_percent: A bias towards SYSMEM expressed as a
+       *   percentage (100 = no bias).  The bandwidth algorithm only selects
+       *   GMEM when its estimated bandwidth is strictly lower; with this
+       *   knob set to N it requires GMEM to be (N/100 - 1) lower, countering
+       *   the optimistic per-pixel GMEM model on small-GMEM dies.  Values
+       *   below 100 are clamped to 100 (no bias).
+       *
+       * autotune_max_tile_count_big_gmem: The maximum GMEM tile count for
+       *   which the BIG_GMEM mod flag (force GMEM for renderpasses with >= 10
+       *   draw calls) is allowed to make an early GMEM decision.  Above this
+       *   threshold we fall through to the regular estimation, since a forced
+       *   GMEM decision on an already ~30+ tile render is pathological.
+       *   0 = unlimited (previous behavior).
+       */
+      uint32_t autotune_gmem_tile_overhead_bytes;
+      uint32_t autotune_gmem_margin_percent;
+      uint32_t autotune_max_tile_count_big_gmem;
    } props;
 };
 

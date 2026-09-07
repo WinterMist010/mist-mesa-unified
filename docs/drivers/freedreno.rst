@@ -663,7 +663,8 @@ any changes even if the folder is recreated.
 
 Additionally, not all ``TU_DEBUG`` options can be toggled at runtime, the following
 are supported at the moment: ``nir``, ``nobin``, ``sysmem``, ``gmem``, ``forcebin``,
-``layout``, ``nolrz``, ``nolrzfc``, ``perf``, ``flushall``, ``syncdraw``,
+``layout``, ``nolrz``, ``nolrzfc``, ``nolrzflip``, ``noclearlrzres``, ``nolrzclear``,
+``nolrzfb``, ``perf``, ``flushall``, ``syncdraw``,
 ``rast_order``, ``unaligned_store``, ``log_skip_gmem_ops``, ``3d_load``, ``fdm``,
 ``noconcurrentresolves``, ``noconcurrentunresolves``, ``nobinmerging``.
 
@@ -742,5 +743,37 @@ environment variables:
 
   Multiple flags can be combined by separating them with commas, e.g.
   ``TU_AUTOTUNE_FLAGS=big_gmem,tune_small``.
+
+Device-specific autotune tuning
+-------------------------------
+
+The autotuner's ``bandwidth`` algorithm can additionally be tuned per-device via
+the device-info ``props`` (set in ``freedreno_devices.py`` per device).  These
+exist mainly to keep the SYSMEM/GMEM tradeoff sane on dies with a small
+dedicated GMEM (e.g. A810/812's 576 KiB), where the number of GMEM tiles
+required to render a pass gets large enough that the raw per-pixel bandwidth
+model no longer reflects reality:
+
+``autotune_gmem_tile_overhead_bytes``
+  Bytes of equivalent memory traffic charged per GMEM tile, to model the fixed
+  per-tile overhead (CP state changes, cache flushes, subpass barriers, less
+  effective draw batching) which the pixel-based model cannot capture.
+  ``0`` disables the charge.
+
+``autotune_gmem_margin_percent``
+  A SYSMEM bias expressed as a percentage (``100`` = no bias).  The bandwidth
+  algorithm only selects GMEM when its estimated bandwidth is more than this
+  many percent lower than SYSMEM's.  Values below ``100`` are clamped.
+
+``autotune_max_tile_count_big_gmem``
+  The maximum GMEM tile count for which the ``big_gmem`` mod flag is allowed
+  to force GMEM; above this it falls back to regular estimation (which for
+  the forced-GMEM case effectively means SYSMEM on small-GMEM dies).
+  ``0`` = unlimited.
+
+All three can be overridden at runtime on any device using the
+``FD_DEV_FEATURES`` debug option, e.g.
+``FD_DEV_FEATURES=autotune_gmem_margin_percent=120:autotune_gmem_tile_overhead_bytes=4096:autotune_max_tile_count_big_gmem=12``,
+which is handy for A/B testing the tuning on other hardware.
 
   If no flags are specified, the default behavior is used.

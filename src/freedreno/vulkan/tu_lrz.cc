@@ -575,7 +575,8 @@ tu_lrz_tiling_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
    if (CHIP >= A7XX) {
       tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(PRED_TEST) |
                              CP_COND_REG_EXEC_0_PRED_BIT(TU_PREDICATE_CB_ENABLED));
-      tu_emit_event_write<CHIP>(cmd, cs, FD_LRZ_FLIP);
+      if (!TU_DEBUG(NOLRZFLIP))
+         tu_emit_event_write<CHIP>(cmd, cs, FD_LRZ_FLIP);
       tu_cond_exec_end(cs);
    }
 
@@ -612,7 +613,7 @@ tu_lrz_tiling_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
       tu_emit_event_write<CHIP>(cmd, cs, FD_LRZ_CLEAR);
    }
 
-   if (!lrz->fast_clear) {
+   if (!lrz->fast_clear && !TU_DEBUG(NOLRZCLEAR)) {
       tu6_clear_lrz<CHIP>(cmd, cs, lrz->image_view->image, &lrz->depth_clear_value);
       /* Even though we disable fast-clear we still have to dirty
        * fast-clear buffer because both secondary cmdbufs and following
@@ -648,6 +649,9 @@ TU_GENX(tu_lrz_after_bv);
 static void
 tu_lrz_clear_resource(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
 {
+   if (TU_DEBUG(NOCLEARLRZRES))
+      return;
+
    uint64_t fc_iova =
       cmd->state.lrz.image_view->image->iova +
       cmd->state.lrz.image_view->image->lrz_layout.lrz_fc_offset;
@@ -743,7 +747,8 @@ tu_lrz_before_tile(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
                                    CP_COND_REG_EXEC_0_PRED_BIT(TU_PREDICATE_CB_ENABLED));
             tu_cond_exec_start(cs, CP_COND_REG_EXEC_0_MODE(PRED_TEST) |
                                    CP_COND_REG_EXEC_0_PRED_BIT(TU_PREDICATE_FIRST_TILE));
-            tu_emit_event_write<CHIP>(cmd, cs, FD_LRZ_FLIP);
+            if (!TU_DEBUG(NOLRZFLIP))
+               tu_emit_event_write<CHIP>(cmd, cs, FD_LRZ_FLIP);
             tu_cond_exec_end(cs);
             tu_cond_exec_end(cs);
          }
@@ -775,7 +780,8 @@ tu_lrz_before_sysmem_br(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
        * This pairs with the LRZ flip in tu_lrz_sysmem_begin.
        */
       if (!lrz->reuse_previous_state) {
-         tu_emit_event_write<CHIP>(cmd, cs, FD_LRZ_FLIP);
+         if (!TU_DEBUG(NOLRZFLIP))
+            tu_emit_event_write<CHIP>(cmd, cs, FD_LRZ_FLIP);
 
          /* This shouldn't be necessary, because we should be able to clear
           * LRZ on BV and then BR should use the clear value written by BV,
@@ -789,7 +795,7 @@ tu_lrz_before_sysmem_br(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
           */
          if (lrz->fast_clear)
             tu_cs_emit_regs(cs, GRAS_LRZ_DEPTH_CLEAR(CHIP, lrz->depth_clear_value.depthStencil.depth));
-      } else {
+      } else if constexpr (CHIP >= A7XX) {
          /* To workaround the same HW errata as above, but where we don't know
           * the clear value, copy the clear value from memory to the register.
           * This is tricky because there are two and we have to select the
@@ -799,7 +805,7 @@ tu_lrz_before_sysmem_br(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
          uint64_t lrz_fc_iova =
             lrz->image_view->image->iova + lrz->image_view->image->lrz_layout.lrz_fc_offset;
          uint64_t br_cur_buffer_iova =
-            lrz_fc_iova + offsetof(fd_lrzfc_layout<A7XX>, br_cur_buffer);
+            lrz_fc_iova + offsetof(fd_lrzfc_layout<CHIP>, br_cur_buffer);
 
          /* Make sure the value is written to memory. */
          tu_emit_event_write<CHIP>(cmd, cs, FD_CACHE_CLEAN);
@@ -816,14 +822,14 @@ tu_lrz_before_sysmem_br(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
          /*    GRAS_LRZ_DEPTH_CLEAR = lrz_fc->buffer[1].depth_clear_val */
          tu_cs_emit_pkt7(cs, CP_MEM_TO_REG, 3);
          tu_cs_emit(cs, CP_MEM_TO_REG_0_REG(GRAS_LRZ_DEPTH_CLEAR(CHIP).reg));
-         tu_cs_emit_qw(cs, lrz_fc_iova + offsetof(fd_lrzfc_layout<A7XX>,
+         tu_cs_emit_qw(cs, lrz_fc_iova + offsetof(fd_lrzfc_layout<CHIP>,
                                                   buffer[1].depth_clear_val));
          /* } else { */
          tu_cs_emit_pkt7(cs, CP_NOP, else_dwords);
          /*    GRAS_LRZ_DEPTH_CLEAR = lrz_fc->buffer[0].depth_clear_val */
          tu_cs_emit_pkt7(cs, CP_MEM_TO_REG, 3);
          tu_cs_emit(cs, CP_MEM_TO_REG_0_REG(GRAS_LRZ_DEPTH_CLEAR(CHIP).reg));
-         tu_cs_emit_qw(cs, lrz_fc_iova + offsetof(fd_lrzfc_layout<A7XX>,
+         tu_cs_emit_qw(cs, lrz_fc_iova + offsetof(fd_lrzfc_layout<CHIP>,
                                                   buffer[0].depth_clear_val));
          /* } */
       }
@@ -887,7 +893,8 @@ template <chip CHIP>
 void
 tu_lrz_sysmem_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
 {
-   if (cmd->device->physical_device->info->props.has_lrz_feedback) {
+   if (cmd->device->physical_device->info->props.has_lrz_feedback &&
+       !TU_DEBUG(NOLRZFB)) {
       tu_lrz_tiling_begin<CHIP>(cmd, cs);
       return;
    }
@@ -922,7 +929,8 @@ tu_lrz_sysmem_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
          tu_emit_event_write<CHIP>(cmd, &cmd->cs, FD_LRZ_CLEAR);
          tu_emit_event_write<CHIP>(cmd, &cmd->cs, FD_LRZ_FLUSH);
       } else {
-         tu6_clear_lrz<CHIP>(cmd, cs, lrz->image_view->image, &lrz->depth_clear_value);
+         if (!TU_DEBUG(NOLRZCLEAR))
+            tu6_clear_lrz<CHIP>(cmd, cs, lrz->image_view->image, &lrz->depth_clear_value);
       }
    }
 }
@@ -932,7 +940,8 @@ template <chip CHIP>
 void
 tu_lrz_sysmem_end(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
 {
-   if (cmd->device->physical_device->info->props.has_lrz_feedback) {
+   if (cmd->device->physical_device->info->props.has_lrz_feedback &&
+       !TU_DEBUG(NOLRZFB)) {
       tu_lrz_tiling_end<CHIP>(cmd, cs);
       return;
    }
@@ -1057,7 +1066,7 @@ tu_lrz_clear_depth_image(struct tu_cmd_buffer *cmd,
    tu_emit_event_write<CHIP>(cmd, &cmd->cs, FD_LRZ_CLEAR);
    tu_emit_event_write<CHIP>(cmd, &cmd->cs, FD_LRZ_FLUSH);
 
-   if (!fast_clear) {
+   if (!fast_clear && !TU_DEBUG(NOLRZCLEAR)) {
       tu6_clear_lrz<CHIP>(cmd, &cmd->cs, image, (const VkClearValue*) pDepthStencil);
    }
 }

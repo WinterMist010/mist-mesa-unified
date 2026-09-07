@@ -46,6 +46,10 @@ def declare_options():
           "Disable conservative LRZ",
           c_name="disable_conservative_lrz"),
 
+        B("tu_disable_lrz", False,
+          "Disable LRZ entirely, equivalent to TU_DEBUG=nolrz but selectable per-application via drirc",
+          c_name="disable_lrz"),
+
         B("tu_dont_reserve_descriptor_set", False,
           "Don't internally reserve one of the HW descriptor sets for descriptor set dynamic offset support, this frees up an extra descriptor set at the cost of that feature",
           c_name="dont_reserve_descriptor_set"),
