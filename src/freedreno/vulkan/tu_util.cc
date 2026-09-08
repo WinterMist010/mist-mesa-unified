@@ -62,6 +62,7 @@ static const struct debug_control tu_debug_options[] = {
    { "noclearlrzres", TU_DEBUG_NOCLEARLRZRES },
    { "nolrzclear", TU_DEBUG_NOLRZCLEAR },
    { "nolrzfb", TU_DEBUG_NOLRZFB },
+   { "nofastborder", TU_DEBUG_NOFASTBORDER },
    { NULL, 0 }
 };
 

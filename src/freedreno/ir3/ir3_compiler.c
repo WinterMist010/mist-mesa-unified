@@ -62,6 +62,8 @@ ir3_get_gpu_profile(uint32_t chip_id)
 {
     switch (chip_id) {
     case 0x44010000: /* Adreno 810 */
+    case 0x44010100: /* Adreno 810 variant */
+    case 0x44010200: /* Adreno 812 */
         return (struct ir3_gpu_profile){90, 4, 4, false};
     case 0x44030000: /* Adreno 825 */
         return (struct ir3_gpu_profile){85, 8, 8, true};
@@ -246,10 +248,19 @@ ir3_compiler_debug_init(void)
    util_call_once(&once, __debug_init);
 }
 
+/* Adreno 810 and 812 are the cut-down Gen8 parts (2 CCUs, 1 slice, 576 KiB
+ * GMEM) with the small-cache characteristics that several workarounds and
+ * optimizations key off of.  chip_id is a 64-bit value that may arrive either
+ * in the KGSL form (0x44010000) or with the 0xffff prefix used for name-based
+ * matching (0xffff44010000), so mask down to the low 32 bits before
+ * comparing.  a812 chip IDs also have a 0x44010100 variant.
+ */
 static inline bool
-ir3_is_a810(const struct fd_dev_id *dev_id)
+ir3_is_a81x(const struct fd_dev_id *dev_id)
 {
-   return dev_id->chip_id == 0x44010000;
+   const uint32_t chip_id = dev_id->chip_id & 0xffffffff;
+   return chip_id == 0x44010000 || chip_id == 0x44010100 ||
+          chip_id == 0x44010200;
 }
 
 struct ir3_compiler *
@@ -268,7 +279,7 @@ ir3_compiler_create(struct fd_device *dev, const struct fd_dev_id *dev_id,
    compiler->options = *options;
    compiler->info = dev_info;
 
-   if (ir3_is_a810(dev_id))
+   if (ir3_is_a81x(dev_id))
       ir3_shader_debug |= IR3_DBG_NODESCPREFETCH;
 
    /* TODO see if older GPU's were different here */
@@ -421,12 +432,12 @@ ir3_compiler_create(struct fd_device *dev, const struct fd_dev_id *dev_id,
    compiler->cat3_rel_offset_0_quirk = compiler->gen <= 5;
 
    /*
-    * Adreno 810 has a much smaller cache/GMEM budget and substantially lower
-    * external memory bandwidth than the larger A8xx parts. Let the UBO
+    * Adreno 810/812 have a much smaller cache/GMEM budget and substantially
+    * lower external memory bandwidth than the larger A8xx parts. Let the UBO
     * promotion pass spend a few extra const-file slots merging nearby ranges
     * so hot shader code issues fewer memory-backed UBO reads.
     */
-   compiler->coalesce_ubo_push_ranges = dev_id->chip_id == 0xffff44010000ull;
+   compiler->coalesce_ubo_push_ranges = ir3_is_a81x(dev_id);
 
    /* The driver can't request this unless preambles are supported. */
    if (options->push_ubo_with_preamble)

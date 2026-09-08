@@ -84,7 +84,14 @@ tu_CreateSampler(VkDevice _device,
          pCreateInfo->borderColor == VK_BORDER_COLOR_INT_CUSTOM_EXT);
       border_color = border_color_index + TU_BORDER_COLOR_BUILTIN;
    } else if (sampler->vk.format != VK_FORMAT_UNDEFINED ||
-              device->instance->drirc.misc.enable_fast_border_color_for_undefined_formats) {
+              device->instance->drirc.misc.enable_fast_border_color_for_undefined_formats ||
+              /* DXVK and vkd3d-proton are known not to use border colors
+               * with D24S8 through VK_FORMAT_UNDEFINED samplers, so the fast
+               * border color HW feature is safe to enable for them by
+               * default. TU_DEBUG=nofastborder opts out.
+               */
+              ((device->instance->is_dxvk || device->instance->is_vkd3d_proton) &&
+               !TU_DEBUG(NOFASTBORDER))) {
       fast_border_color_enable = true;
       switch (pCreateInfo->borderColor) {
          case VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK:

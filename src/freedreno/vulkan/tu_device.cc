@@ -2034,6 +2034,14 @@ tu_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
    instance->vk.physical_devices.enumerate = tu_enumerate_devices;
    instance->vk.physical_devices.destroy = tu_destroy_physical_device;
 
+   /* Engine detection, same pattern as ANV (see anv_instance.c): DXVK
+    * reports engineName "DXVK", vkd3d-proton reports "vkd3d-proton".
+    */
+   const char *engine_name = instance->vk.app_info.engine_name;
+   instance->is_dxvk = engine_name && !strcmp(engine_name, "DXVK");
+   instance->is_vkd3d_proton =
+      engine_name && !strcmp(engine_name, "vkd3d-proton");
+
    instance->instance_idx = p_atomic_fetch_add(&instance_count, 1);
    if (TU_DEBUG(STARTUP))
       mesa_logi("Created an instance");

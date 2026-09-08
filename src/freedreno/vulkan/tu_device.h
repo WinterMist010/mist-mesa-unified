@@ -202,6 +202,15 @@ struct tu_instance
 
    struct turnip_drirc drirc;
 
+   /* Set when the application is using the DXVK (D3D9/10/11) or
+    * vkd3d-proton (D3D12) translation layers, detected via
+    * VkApplicationInfo::pEngineName in tu_CreateInstance(). Used to
+    * default-enable optimizations and workarounds which are known to be
+    * safe for these engines (see tu_sampler.cc fast border colors).
+    */
+   bool is_dxvk;
+   bool is_vkd3d_proton;
+
    const struct tu_knl *knl;
 
    uint32_t instance_idx;

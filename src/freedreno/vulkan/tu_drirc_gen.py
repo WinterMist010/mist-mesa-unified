@@ -81,6 +81,8 @@ def declare_options():
         # fast border color HW feature results in an incorrect color being used.
         # However, we want to enable fast border colors for apps that are known
         # not to use border colors with D24S8, such as DXVK and vkd3d-proton.
+        # For those engines this is also enabled by default at runtime (see
+        # tu_sampler.cc); this option covers any other app.
         B("tu_enable_fast_border_color_for_undefined_formats", False,
           "Enables fast border color HW feature for VK_FORMAT_UNDEFINED sampler formats.",
           c_name="enable_fast_border_color_for_undefined_formats"),

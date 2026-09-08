@@ -80,6 +80,7 @@ enum tu_debug_flags : uint64_t
    TU_DEBUG_NOCLEARLRZRES            = BITFIELD64_BIT(40),
    TU_DEBUG_NOLRZCLEAR               = BITFIELD64_BIT(41),
    TU_DEBUG_NOLRZFB                  = BITFIELD64_BIT(42),
+   TU_DEBUG_NOFASTBORDER             = BITFIELD64_BIT(43),
 };
 
 struct tu_env {

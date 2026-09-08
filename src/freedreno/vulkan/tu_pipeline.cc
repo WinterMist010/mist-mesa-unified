@@ -1744,14 +1744,17 @@ tu_pipeline_builder_compile_shaders(struct tu_pipeline_builder *builder,
    VkPipelineCreationFeedback stage_feedbacks[MESA_SHADER_STAGES] = { 0 };
 
    const struct fd_dev_id *dev_id = &builder->device->physical_device->dev_id;
-const uint64_t chip_id = dev_id->chip_id;
+const uint32_t chip_id = dev_id->chip_id & 0xffffffff; /* KGSL-form ID */
 
-const bool is_a810 = (chip_id == 0x44010000ull) || (dev_id->gpu_id == 810);
-const bool is_a812 = (chip_id == 0x44010200ull) || (chip_id == 0x44010100ull) || (dev_id->gpu_id == 812);
-const bool is_a825 = (chip_id == 0x44030000ull) || (dev_id->gpu_id == 825);
-const bool is_a829 = (chip_id == 0x44030A20ull) || (dev_id->gpu_id == 829);
-const bool is_a830 = (chip_id == 0xffff44050000ull) || (chip_id == 0x44050000ull) || 
-                     (chip_id == 0x44050001ull)     || (dev_id->gpu_id == 830);
+/* chip_id may arrive as 0xffff<prefix> (name-matched form) or KGSL form;
+ * masking to the low 32 bits covers both, same as ir3_is_a81x().
+ */
+const bool is_a810 = (chip_id == 0x44010000) || (dev_id->gpu_id == 810);
+const bool is_a812 = (chip_id == 0x44010200) || (chip_id == 0x44010100) || (dev_id->gpu_id == 812);
+const bool is_a825 = (chip_id == 0x44030000) || (dev_id->gpu_id == 825);
+const bool is_a829 = (chip_id == 0x44030A20) || (dev_id->gpu_id == 829);
+const bool is_a830 = (chip_id == 0x44050001)     || (chip_id == 0x44050000) ||
+                     (dev_id->gpu_id == 830);
 
 const bool is_target_gpu = is_a810 || is_a812 || is_a825 || is_a829 || is_a830;
    const bool executable_info =

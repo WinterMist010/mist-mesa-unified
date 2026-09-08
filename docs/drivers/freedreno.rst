@@ -672,6 +672,18 @@ Some of these options will behave differently when toggled at runtime, for examp
 ``nolrz`` will still result in LRZ allocation which would not happen if the option
 was set in the environment variable.
 
+DXVK and vkd3d-proton engine defaults
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Turnip detects applications using the DXVK (D3D9/10/11) or vkd3d-proton (D3D12)
+translation layers via ``VkApplicationInfo::pEngineName``. For these engines the
+fast border color hardware feature is automatically enabled for samplers created
+with ``VK_FORMAT_UNDEFINED``, which is known to be safe for these translation
+layers (they never use border colors with D24S8 through format-less samplers)
+and avoids the slow path in sampler creation. This can be turned off with
+``TU_DEBUG=nofastborder``, or enabled for other applications with the drirc
+option ``tu_enable_fast_border_color_for_undefined_formats``.
+
 Autotune
 ^^^^^^^^
 
