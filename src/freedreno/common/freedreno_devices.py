@@ -1455,9 +1455,9 @@ a8xx_810 = GPUProps(
 
     # Sysmem CCU cache sizing tuned to prevent integer underflows in Freedreno tiling calculations
     sysmem_ccu_color_cache_fraction = CCUColorCacheFraction.FULL.value,
-    sysmem_per_ccu_color_cache_size = 32 * 1024,
+    sysmem_per_ccu_color_cache_size = 64 * 1024,
     sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
-    sysmem_per_ccu_depth_cache_size = 32 * 1024,
+    sysmem_per_ccu_depth_cache_size = 64 * 1024,
 
     # GMEM VPC buffer layout (expanded from the bottlenecked 16K/12K/20K)
     gmem_vpc_attr_buf_size   = 49152,   # 48 KiB
@@ -1466,7 +1466,7 @@ a8xx_810 = GPUProps(
 
     # GMEM CCU cache fractions matching A810 hardware cache partitions
     gmem_ccu_color_cache_fraction = CCUColorCacheFraction.EIGHTH.value,
-    gmem_per_ccu_color_cache_size = 16 * 1024,
+    gmem_per_ccu_color_cache_size = 24 * 1024,
     gmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
     gmem_per_ccu_depth_cache_size = 32 * 1024,
 
@@ -1507,7 +1507,7 @@ add_gpus([
     ], A6xxGPUInfo(
         CHIP.A8XX,
         [a7xx_base, a7xx_gen3, a8xx_base, a8xx_810],
-        num_ccu = 2,
+        num_ccu = 1,
         num_slices = 1,
         tile_align_w = 64,
         tile_align_h = 32,
