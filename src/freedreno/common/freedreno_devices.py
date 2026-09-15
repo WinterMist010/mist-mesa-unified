@@ -1456,7 +1456,7 @@ a8xx_810 = GPUProps(
     # Sysmem CCU cache sizing tuned to prevent integer underflows in Freedreno tiling calculations
     sysmem_ccu_color_cache_fraction = CCUColorCacheFraction.FULL.value,
     sysmem_per_ccu_color_cache_size = 32 * 1024,
-    sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
+    sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value, #?. Whitebelyash uses this instead of three_quarter, havent tested correctness.
     sysmem_per_ccu_depth_cache_size = 32 * 1024,
 
     # GMEM VPC buffer layout:
@@ -1482,22 +1482,12 @@ a8xx_810 = GPUProps(
     enable_tp_ubwc_flag_hint = True,      # Fixes UBWC texture corruption and screen artifacts
     max_samples = 4,                      # Max MSAA samples (fd_dev_info.props.max_samples; consumed by turnip + ir3)
 
-    # Autotuner tuning for the 576 KiB dedicated GMEM.  The usable GMEM after
-    # CCU/VPC reservations is only ~272 KiB (~24 KiB gmem blocks at 96x32
-    # tile alignment), which means common 1080p multisample render targets
-    # end up with ~30+ GMEM tiles (vs single-digit on A750).  Tell the
-    # autotuner to charge a per-tile overhead against GMEM bandwidth and to
-    # require GMEM to be meaningfully cheaper before selecting it, otherwise
-    # the raw per-pixel model systematically overestimates GMEM wins.
-    #   - 4096 B/tile initial calibration: roughly a tile's worth of
-    #     state-change/flush traffic; tune with fpv regressions.
-    #   - 120% margin: require GMEM to be at least 20% cheaper.
-    #   - Restrict BIG_GMEM (force-GMEM >= 10 draws) to low tile counts.
+    # Autotuner tuning for the 576 KiB dedicated GMEM.
     autotune_gmem_tile_overhead_bytes = 8192,
     autotune_gmem_margin_percent = 135,
-    autotune_max_tile_count_big_gmem = 12,
+    autotune_max_tile_count_big_gmem = 8,
 
-    # Set to True if gmem breaks. probably not needed.
+    # Set to True if GMEM breaks. Probably not needed.
     # disable_gmem = False,
 )
 
