@@ -1480,6 +1480,7 @@ a8xx_810 = GPUProps(
     has_salu_int_narrowing_quirk = True,  # Fixes A8xx SALU integer narrowing errata
     shading_rate_matches_vk = True,       # Proper VRS mapping for Vulkan 1.3
     enable_tp_ubwc_flag_hint = True,      # Fixes UBWC texture corruption and screen artifacts
+    supports_double_threadsize = False,
     max_samples = 4,                      # Max MSAA samples (fd_dev_info.props.max_samples; consumed by turnip + ir3)
 
     # Autotuner tuning for the 576 KiB dedicated GMEM.  The usable GMEM after
@@ -1516,7 +1517,7 @@ add_gpus([
         tile_max_w = 16384,
         tile_max_h = 16384,
         num_vsc_pipes = 32,
-        cs_shared_mem_size = 64 * 1024,
+        cs_shared_mem_size = 32 * 1024,
         wave_granularity = 2,
         fibers_per_sp = 128 * 2 * 16,
         highest_bank_bit = 16,
