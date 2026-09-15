@@ -1459,10 +1459,12 @@ a8xx_810 = GPUProps(
     sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
     sysmem_per_ccu_depth_cache_size = 32 * 1024,
 
-    # GMEM VPC buffer layout (expanded from the bottlenecked 16K/12K/20K)
-    gmem_vpc_attr_buf_size   = 49152,   # 48 KiB
-    gmem_vpc_pos_buf_size    = 24576,   # 24 KiB
-    gmem_vpc_bv_pos_buf_size = 32768,   # 32 KiB
+    # GMEM VPC buffer layout:
+    # Lean 24K / 12K / 16K footprint saves ~52 KiB vs 48K/24K/32K,
+    # freeing precious GMEM for larger tile dimensions on 576 KiB hardware.
+    gmem_vpc_attr_buf_size   = 24576,   # 24 KiB
+    gmem_vpc_pos_buf_size    = 12288,   # 12 KiB
+    gmem_vpc_bv_pos_buf_size = 16384,   # 16 KiB
 
     # GMEM CCU cache fractions matching A810 hardware cache partitions
     gmem_ccu_color_cache_fraction = CCUColorCacheFraction.EIGHTH.value,
@@ -1491,8 +1493,8 @@ a8xx_810 = GPUProps(
     #     state-change/flush traffic; tune with fpv regressions.
     #   - 120% margin: require GMEM to be at least 20% cheaper.
     #   - Restrict BIG_GMEM (force-GMEM >= 10 draws) to low tile counts.
-    autotune_gmem_tile_overhead_bytes = 4096,
-    autotune_gmem_margin_percent = 120,
+    autotune_gmem_tile_overhead_bytes = 8192,
+    autotune_gmem_margin_percent = 135,
     autotune_max_tile_count_big_gmem = 12,
 
     # Set to True if gmem breaks. probably not needed.
