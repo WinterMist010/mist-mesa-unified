@@ -214,6 +214,14 @@ nir_io_offset ir3_nir_get_global_offset(nir_builder *b,
                                         struct ir3_compiler *compiler,
                                         nir_def *offset, unsigned offset_shift);
 
+static inline bool
+ir3_nir_is_prefetchable(nir_intrinsic_instr *intr)
+{
+   return intr->instr.block->cf_node.parent->type == nir_cf_node_function ||
+      (nir_intrinsic_access(intr) & ACCESS_CAN_SPECULATE);
+}
+
+
 bool ir3_nir_is_preamble_speculatable(nir_shader *s);
 
 ENDC;
