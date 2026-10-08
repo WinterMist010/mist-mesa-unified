@@ -179,6 +179,8 @@ gather_ubo_ranges(nir_shader *nir, nir_intrinsic_instr *instr,
 
       plan_r->start = r.start;
       plan_r->end = r.end;
+      plan_r->can_speculate &=
+         !!(nir_intrinsic_access(instr) & ACCESS_CAN_SPECULATE);
       *upload_remaining -= added;
 
       merge_neighbors(state, i, max_coalesce_gap);
@@ -196,6 +198,7 @@ gather_ubo_ranges(nir_shader *nir, nir_intrinsic_instr *instr,
    plan_r->ubo = ubo;
    plan_r->start = r.start;
    plan_r->end = r.end;
+   plan_r->can_speculate = nir_intrinsic_access(instr) & ACCESS_CAN_SPECULATE;
    *upload_remaining -= added;
 }
 
@@ -863,6 +866,7 @@ ir3_nir_lower_load_const_instr(nir_builder *b, nir_instr *in_instr, void *data)
 
    nir_def *result =
       nir_load_ubo(b, num_components, bit_size, index, offset,
+                   .access = ACCESS_CAN_SPECULATE,
                    .align_mul = nir_intrinsic_align_mul(instr),
                    .align_offset = nir_intrinsic_align_offset(instr),
                    .range_base = base, .range = nir_intrinsic_range(instr));

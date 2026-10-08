@@ -204,11 +204,19 @@ ir3_nir_should_vectorize_mem(unsigned align_mul, unsigned align_offset,
          num_components <= 4;
    }
 
+   int size = num_components * byte_size;
+
+   if ((low->intrinsic == nir_intrinsic_load_scratch) ||
+       (low->intrinsic == nir_intrinsic_store_scratch)) {
+      /* limit max size/alignment to 32b */
+      return size <= 32 && align_mul >= byte_size &&
+         align_offset % byte_size == 0 &&
+         num_components <= 4;
+   }
+
    assert(bit_size >= 8);
    if (bit_size != 32)
       return false;
-
-   int size = num_components * byte_size;
 
    /* Don't care about alignment past vec4. */
    assert(util_is_power_of_two_nonzero(align_mul));
@@ -322,9 +330,9 @@ ir3_optimize_loop(struct ir3_compiler *compiler,
       if (gcm == -1)
          gcm = debug_get_num_option("GCM", 0);
       if (gcm == 1)
-         progress |= OPT(s, nir_opt_gcm, true, true);
+         progress |= OPT(s, nir_opt_gcm, true);
       else if (gcm == 2)
-         progress |= OPT(s, nir_opt_gcm, false, true);
+         progress |= OPT(s, nir_opt_gcm, false);
       nir_opt_peephole_select_options peephole_select_options = {
          .limit = 16,
          .indirect_load_ok = true,
@@ -814,7 +822,7 @@ ir3_finalize_nir(struct ir3_compiler *compiler,
     */
    nir_load_store_vectorize_options vectorize_opts = {
       .modes = nir_var_mem_ubo | nir_var_mem_ssbo | nir_var_mem_shared |
-               nir_var_uniform | nir_var_mem_global,
+               nir_var_uniform | nir_var_mem_global | nir_var_shader_temp,
       .callback = ir3_nir_should_vectorize_mem,
       .robust_modes = options->robust_modes,
       .cb_data = compiler,
@@ -999,7 +1007,6 @@ ir3_nir_post_finalize(struct ir3_shader *shader)
       NIR_PASS(_, s, nir_opt_barycentric, true);
       NIR_PASS(_, s, ir3_nir_lower_load_sample_pos);
       NIR_PASS(_, s, ir3_nir_lower_load_barycentric_at_offset);
-      NIR_PASS(_, s, ir3_nir_move_varying_inputs);
       NIR_PASS(_, s, nir_lower_fb_read);
       NIR_PASS(_, s, ir3_nir_lower_layer_id);
       if (!compiler->info->props.shading_rate_matches_vk)
@@ -1066,6 +1073,7 @@ ir3_nir_post_finalize(struct ir3_shader *shader)
             .lower_rotate_to_shuffle = !compiler->has_shfl,
             .lower_rotate_clustered_to_shuffle = true,
             .lower_inverse_ballot = true,
+            .lower_quad_vote = true,
             .lower_reduce = true,
             .filter = ir3_nir_lower_subgroups_filter,
             .filter_data = compiler,
@@ -1241,6 +1249,7 @@ ir3_get_ra_size_align_bytes(const glsl_type *type, unsigned *size, unsigned *ali
    case GLSL_TYPE_UINT:
    case GLSL_TYPE_INT:
    case GLSL_TYPE_FLOAT:
+   case GLSL_TYPE_YUV_CSC_STANDARD_EXT:
    case GLSL_TYPE_DOUBLE:
    case GLSL_TYPE_UINT64:
    case GLSL_TYPE_INT64: {
@@ -1521,6 +1530,16 @@ ir3_nir_lower_variant(struct ir3_shader_variant *so,
          nir_shader_gather_info(s, nir_shader_get_entrypoint(s));
       }
    }
+
+   const enum nir_lower_non_uniform_access_type non_uniform_access_types =
+      nir_lower_non_uniform_ubo_access | nir_lower_non_uniform_ssbo_access |
+      nir_lower_non_uniform_get_ssbo_size |
+      nir_lower_non_uniform_texture_access |
+      nir_lower_non_uniform_texture_query | nir_lower_non_uniform_image_access |
+      nir_lower_non_uniform_image_query;
+
+   if (nir_has_non_uniform_access(s, non_uniform_access_types))
+      progress |= OPT(s, nir_opt_non_uniform_access);
 
    /* Move large constant variables to the constants attached to the NIR
     * shader, which we will upload in the immediates range.  This generates

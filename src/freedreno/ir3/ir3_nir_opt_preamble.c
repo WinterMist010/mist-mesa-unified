@@ -174,8 +174,7 @@ instr_cost(nir_instr *instr, const void *data)
          }
 
          if (const_ubo && nir_src_is_const(intrin->src[1]) &&
-             (instr->block->cf_node.parent->type == nir_cf_node_function ||
-              (nir_intrinsic_access(intrin) & ACCESS_CAN_SPECULATE)))
+             ir3_nir_is_prefetchable(intrin))
             return 0;
 
          /* TODO: get actual numbers for ldc */
@@ -336,16 +335,15 @@ ir3_def_is_rematerializable_for_preamble(nir_def *def,
       nir_intrinsic_instr *intrin = nir_def_as_intrinsic(def);
       switch (intrin->intrinsic) {
       case nir_intrinsic_load_ubo:
-         return ir3_def_is_rematerializable_for_preamble(intrin->src[0].ssa,
-                                                         preamble_defs) &&
-            ir3_def_is_rematerializable_for_preamble(intrin->src[1].ssa,
+         return ir3_nir_is_prefetchable(intrin) &&
+            ir3_def_is_rematerializable_for_preamble(intrin->src[0].ssa,
                                                      preamble_defs) &&
-            (nir_def_block(def)->cf_node.parent->type ==
-             nir_cf_node_function ||
-             (nir_intrinsic_access(intrin) & ACCESS_CAN_SPECULATE));
+            ir3_def_is_rematerializable_for_preamble(intrin->src[1].ssa,
+                                                     preamble_defs);
       case nir_intrinsic_bindless_resource_ir3:
-         return ir3_def_is_rematerializable_for_preamble(intrin->src[0].ssa,
-                                                         preamble_defs);
+         return ir3_nir_is_prefetchable(intrin) &&
+            ir3_def_is_rematerializable_for_preamble(intrin->src[0].ssa,
+                                                     preamble_defs);
       case nir_intrinsic_load_preamble:
          return !!preamble_defs;
       default:
@@ -490,7 +488,7 @@ _rematerialize_def(nir_builder *b, struct hash_table *remap_ht,
 
    if (instr_set) {
       nir_instr *other_instr =
-         nir_instr_set_add_or_rewrite(instr_set, instr, dominates);
+         nir_instr_set_add_or_rewrite(instr_set, instr, NULL, NULL, dominates);
       if (other_instr) {
          instr = other_instr;
          _mesa_hash_table_insert(remap_ht, def, nir_instr_def(other_instr));

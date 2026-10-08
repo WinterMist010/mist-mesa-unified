@@ -245,13 +245,7 @@ lower_cmat_construct(nir_builder *b, nir_intrinsic_instr *intr, const lower_cmat
 static nir_deref_instr *
 convert_ssbo_to_global(nir_builder *b, nir_deref_instr *deref, int elem_bits)
 {
-   nir_def *descriptor = nir_ssbo_descriptor_amd(b, &deref->def);
-   nir_def *addr_lo = nir_channel(b, descriptor, 0);
-   nir_def *addr_hi = nir_extract_i16(b, nir_channel(b, descriptor, 1), nir_imm_int(b, 0));
-   nir_def *addr = nir_pack_64_2x32_split(b, addr_lo, addr_hi);
-
-   nir_def *offset = nir_channel(b, &deref->def, 2);
-   addr = nir_iadd_nuw(b, addr, nir_u2u64(b, offset));
+   nir_def *addr = nir_deref_buffer_address(b, 1, 64, &deref->def);
    return nir_build_deref_cast(b, addr, nir_var_mem_global, deref->type, elem_bits / 8);
 }
 
@@ -800,7 +794,7 @@ lower_cmat_convert_transpose(nir_builder *b, nir_intrinsic_instr *intr, const lo
    struct glsl_cmat_description src_desc = *glsl_get_cmat_description(src_deref->type);
    nir_def *src = radv_nir_load_cmat(b, params, intr->src[1].ssa);
 
-   bool sat = false;
+   bool sat = nir_intrinsic_saturate(intr);
    const bool transpose = intr->intrinsic == nir_intrinsic_cmat_transpose;
 
    enum glsl_cmat_use dst_use = dst_desc.use;
@@ -809,8 +803,14 @@ lower_cmat_convert_transpose(nir_builder *b, nir_intrinsic_instr *intr, const lo
    enum glsl_base_type dst_element_type = dst_desc.element_type;
    enum glsl_base_type src_element_type = src_desc.element_type;
 
+   nir_cmat_signed cmat_signed_mask = nir_intrinsic_cmat_signed_mask(intr);
+
+   dst_element_type =
+      glsl_apply_signedness_to_base_type(dst_element_type, cmat_signed_mask & NIR_CMAT_RESULT_SIGNED);
+   src_element_type = glsl_apply_signedness_to_base_type(src_element_type, cmat_signed_mask & NIR_CMAT_A_SIGNED);
+
    if (transpose) {
-      /* NV_cmat2 only support acc -> b transpose, but we can handle any transpose except acc -> acc. */
+      /* SPIR-V supports acc -> b/a and a/b -> acc transposes */
       if (dst_use == GLSL_CMAT_USE_A) {
          dst_use = GLSL_CMAT_USE_B;
       } else if (dst_use == GLSL_CMAT_USE_B) {
@@ -823,13 +823,6 @@ lower_cmat_convert_transpose(nir_builder *b, nir_intrinsic_instr *intr, const lo
          else
             UNREACHABLE("unsupported transpose");
       }
-   } else {
-      sat = nir_intrinsic_saturate(intr);
-      nir_cmat_signed cmat_signed_mask = nir_intrinsic_cmat_signed_mask(intr);
-
-      dst_element_type =
-         glsl_apply_signedness_to_base_type(dst_element_type, cmat_signed_mask & NIR_CMAT_RESULT_SIGNED);
-      src_element_type = glsl_apply_signedness_to_base_type(src_element_type, cmat_signed_mask & NIR_CMAT_A_SIGNED);
    }
 
    unsigned dst_mul = radv_nir_cmat_length_mul(dst_desc, params);
@@ -1248,6 +1241,28 @@ lower_cmat_per_element_op(nir_builder *b, nir_cmat_call_instr *call, const lower
    return true;
 }
 
+static bool
+lower_cmat_get_coordinate(nir_builder *b, nir_intrinsic_instr *intr, const lower_cmat_params *params)
+{
+   struct glsl_cmat_description desc = nir_intrinsic_cmat_desc(intr);
+
+   nir_def *comps[2];
+   nir_def *local_idx = nir_load_subgroup_invocation(b);
+   nir_def *inner_idx = nir_iand_imm(b, local_idx, 15);
+   nir_def *base_row = radv_get_base_row(b, desc, params, local_idx);
+   uint32_t row_increase = params->gfx_level < GFX11_7 && desc.use == GLSL_CMAT_USE_ACCUMULATOR ? params->wave_size / 16 : 1;
+
+   comps[0] = nir_iadd(b, base_row, nir_imul_imm(b, intr->src[0].ssa, row_increase));
+   comps[1] = inner_idx;
+
+   if (desc.use == GLSL_CMAT_USE_A) {
+      SWAP(comps[0], comps[1]);
+   }
+   nir_def *val = nir_vec(b, comps, 2);
+   nir_def_replace(&intr->def, val);
+   return true;
+}
+
 bool
 radv_nir_lower_cooperative_matrix(nir_shader *shader, enum amd_gfx_level gfx_level, unsigned wave_size)
 {
@@ -1328,6 +1343,9 @@ radv_nir_lower_cooperative_matrix(nir_shader *shader, enum amd_gfx_level gfx_lev
                break;
             case nir_intrinsic_cmat_copy:
                progress |= lower_cmat_copy(&b, intr);
+               break;
+            case nir_intrinsic_cmat_get_coordinate:
+               progress |= lower_cmat_get_coordinate(&b, intr, &params);
                break;
             default:
                continue;

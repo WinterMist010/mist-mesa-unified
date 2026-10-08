@@ -37,7 +37,7 @@ anv_device_finish_shader_dump(struct anv_device *device)
    if (!ANV_DEBUG(SHADER_DUMP) && !INTEL_DEBUG(DEBUG_SHADERS_LINENO))
       return;
 
-   debug_archiver_finish_file(device->shader_dump.archive);
+   debug_archiver_close(device->shader_dump.archive);
 
    simple_mtx_destroy(&device->shader_dump.mutex);
 }
@@ -186,7 +186,7 @@ anv_shader_deserialize(struct vk_device *vk_device,
    blob_copy_bytes(blob, data.bind_map.surface_blake3, sizeof(data.bind_map.surface_blake3));
    blob_copy_bytes(blob, data.bind_map.sampler_blake3, sizeof(data.bind_map.sampler_blake3));
    blob_copy_bytes(blob, data.bind_map.push_blake3, sizeof(data.bind_map.push_blake3));
-   data.bind_map.layout_type = blob_read_uint16(blob);
+   data.bind_map.binding_mode = blob_read_uint16(blob);
    data.bind_map.binding_mask = blob_read_uint16(blob);
    data.bind_map.surface_count = blob_read_uint8(blob);
    data.bind_map.sampler_count = blob_read_uint8(blob);
@@ -271,7 +271,7 @@ anv_shader_serialize(struct vk_device *device,
                     sizeof(shader->bind_map.sampler_blake3));
    blob_write_bytes(blob, shader->bind_map.push_blake3,
                     sizeof(shader->bind_map.push_blake3));
-   blob_write_uint16(blob, shader->bind_map.layout_type);
+   blob_write_uint16(blob, shader->bind_map.binding_mode);
    blob_write_uint16(blob, shader->bind_map.binding_mask);
    blob_write_uint8(blob, shader->bind_map.surface_count);
    blob_write_uint8(blob, shader->bind_map.sampler_count);
@@ -658,6 +658,33 @@ anv_shader_set_relocs(struct anv_device *device,
             device->physical, device->descriptor_view_state),
       };
    }
+   if (device->physical->uses_efficient_64bit) {
+      reloc_values[rv_count++] = (struct intel_shader_reloc_value) {
+         .id = BRW_SHADER_RELOC_DESCRIPTORS_INTERNAL_HIGH,
+         .value = device->physical->va.internal_surface_state_pool.addr >> 32,
+      };
+      reloc_values[rv_count++] = (struct intel_shader_reloc_value) {
+         .id = BRW_SHADER_RELOC_DESCRIPTORS_APP_HIGH,
+         .value = device->physical->va.bindless_surface_state_pool.addr >> 32,
+      };
+
+      if (shader->prog_data->total_scratch > 0) {
+         reloc_values[rv_count++] = (struct intel_shader_reloc_value) {
+            .id = BRW_SHADER_RELOC_SCRATCH64_SURFACE_HIGH,
+            .value = device->physical->va.internal_surface_state_pool.addr >> 32,
+         };
+         /* TODO: deal with protected scratch surfaces in efficient 64bit mode
+          *
+          * We could upload the shader twice?
+          */
+         reloc_values[rv_count++] = (struct intel_shader_reloc_value) {
+            .id = BRW_SHADER_RELOC_SCRATCH64_SURFACE_LOW,
+            .value = anv_shader_get_scratch_surf(
+               NULL, device, shader->vk.stage,
+               shader->prog_data->total_scratch, false /* protected */),
+         };
+      }
+   }
 
    if (anv_needs_printf_buffer()) {
       struct anv_bo *bo = device->printf.bo;
@@ -906,10 +933,10 @@ anv_shader_create(struct anv_device *device,
 
 
    /* Apply workarounds associated with this shader hash */
-   struct anv_instance *instance = device->physical->instance;
-   if (instance->shader_workarounds != NULL) {
+   struct anv_physical_device *pdevice = device->physical;
+   if (pdevice->shader_workarounds != NULL) {
       struct anv_shader_workaround *workaround =
-         _mesa_hash_table_u64_search(instance->shader_workarounds,
+         _mesa_hash_table_u64_search(pdevice->shader_workarounds,
                                      shader->prog_data->source_hash);
       if (workaround != NULL)
          shader->workaround = *workaround;

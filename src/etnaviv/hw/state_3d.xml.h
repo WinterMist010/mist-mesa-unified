@@ -8,14 +8,14 @@ http://0x04.net/cgit/index.cgi/rules-ng-ng
 git clone git://0x04.net/rules-ng-ng
 
 The rules-ng-ng source files this header was generated from are:
-- state.xml     (  30841 bytes, from 2026-08-04 21:35:23)
-- common.xml    (  35664 bytes, from 2026-07-29 06:39:05)
-- common_3d.xml (  15069 bytes, from 2026-07-29 06:39:05)
-- state_hi.xml  (  35909 bytes, from 2026-07-29 06:39:05)
+- state.xml     (  30841 bytes, from 2026-09-15 20:32:14)
+- common.xml    (  35664 bytes, from 2026-09-14 08:57:29)
+- common_3d.xml (  15069 bytes, from 2026-09-14 08:57:29)
+- state_hi.xml  (  35909 bytes, from 2026-09-14 08:57:29)
 - copyright.xml (   1597 bytes, from 2026-03-02 22:49:28)
-- state_2d.xml  (  52271 bytes, from 2026-03-02 22:49:28)
-- state_3d.xml  (  92718 bytes, from 2026-08-04 19:09:21)
-- state_blt.xml (  15932 bytes, from 2026-08-04 21:35:07)
+- state_2d.xml  (  52271 bytes, from 2026-09-02 08:26:36)
+- state_3d.xml  (  92949 bytes, from 2026-09-15 20:32:14)
+- state_blt.xml (  15932 bytes, from 2026-09-15 20:32:14)
 - state_vg.xml  (   5975 bytes, from 2026-03-02 22:49:28)
 
 Copyright (C) 2012-2026 by the following authors:
@@ -83,6 +83,7 @@ DEALINGS IN THE SOFTWARE.
 #define RS_FORMAT_YUY2						0x00000007
 #define RS_FORMAT_S8						0x00000010
 #define RS_FORMAT_64BPP_CLEAR					0x00000015
+#define RS_FORMAT_A2R10G10B10					0x00000016
 #define RS_FORMAT_D32						0x00000017
 #define RS_FORMAT_D16						0x00000018
 #define PE_FORMAT_X4R4G4B4					0x00000000
@@ -110,6 +111,7 @@ DEALINGS IN THE SOFTWARE.
 #define PE_FORMAT_A2B10G10R10UI					0x0000001e
 #define PE_FORMAT_G8R8						0x0000001f
 #define PE_FORMAT_R8						0x00000023
+#define PE_FORMAT_A8B8G8R8					0x0000002b
 #define LOGIC_OP_CLEAR						0x00000000
 #define LOGIC_OP_NOR						0x00000001
 #define LOGIC_OP_AND_INVERTED					0x00000002
@@ -1444,6 +1446,7 @@ DEALINGS IN THE SOFTWARE.
 
 #define VIVS_RS_SINGLE_BUFFER					0x000016b8
 #define VIVS_RS_SINGLE_BUFFER_ENABLE				0x00000001
+#define VIVS_RS_SINGLE_BUFFER_DOWNSAMPLE_ONE_SAMPLE		0x00000002
 
 #define VIVS_RS_PIPE(i0)				       (0x00000000 + 0x4*(i0))
 #define VIVS_RS_PIPE__ESIZE					0x00000004

@@ -107,7 +107,7 @@ genX(batch_emit_push_constants_alloc)(struct anv_batch *batch,
 static void
 cmd_buffer_alloc_gfx_push_constants(struct anv_cmd_buffer *cmd_buffer)
 {
-   if (cmd_buffer->device->physical->instance->drirc.perf.disable_push_const_alloc)
+   if (cmd_buffer->device->physical->drirc.perf.disable_push_const_alloc)
       return;
 
    struct anv_cmd_graphics_state *gfx = &cmd_buffer->state.gfx;
@@ -185,7 +185,7 @@ get_push_range_address(struct anv_cmd_buffer *cmd_buffer,
 
    switch (range->set) {
    case ANV_DESCRIPTOR_SET_DESCRIPTORS:
-      if (shader->bind_map.layout_type == ANV_PIPELINE_DESCRIPTOR_SET_LAYOUT_TYPE_BUFFER) {
+      if (shader->bind_map.binding_mode == ANV_SHADER_BINDING_MODE_BUFFER) {
          return anv_address_from_u64(
             anv_cmd_buffer_descriptor_buffer_address(
                cmd_buffer,
@@ -269,7 +269,7 @@ get_push_range_bound_size(struct anv_cmd_buffer *cmd_buffer,
 
    switch (range->set) {
    case ANV_DESCRIPTOR_SET_DESCRIPTORS:
-      if (shader->bind_map.layout_type == ANV_PIPELINE_DESCRIPTOR_SET_LAYOUT_TYPE_BUFFER) {
+      if (shader->bind_map.binding_mode == ANV_SHADER_BINDING_MODE_BUFFER) {
          /* It's hard to bound a reference to a descriptor buffer because we
           * don't have an actual buffer, only an address. So just return the
           * maximum size of the heap (which bounds the largest buffer size).
@@ -485,8 +485,8 @@ cmd_buffer_flush_gfx_push_constants(struct anv_cmd_buffer *cmd_buffer,
          }
 
          /* Update the pushed bound length constant if it changed */
-         if (range_mask != push->gfx.push_reg_mask[stage][r]) {
-            push->gfx.push_reg_mask[stage][r] = range_mask;
+         if (range_mask != push->drv_data.gfx.push_reg_mask[stage][r]) {
+            push->drv_data.gfx.push_reg_mask[stage][r] = range_mask;
             cmd_buffer->state.push_constants_dirty |=
                mesa_to_vk_shader_stage(stage);
             bind_state->push_constants_state = ANV_STATE_NULL;
@@ -713,6 +713,8 @@ cmd_buffer_maybe_flush_rt_writes(struct anv_cmd_buffer *cmd_buffer,
       }
    }
 
+   need_rt_flush &= GFX_VERx10 < 350 || !cmd_buffer->device->physical->uses_efficient_64bit;
+
    if (need_rt_flush) {
       anv_cmd_buffer_dirty_descriptors(cmd_buffer,
                                        VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -818,7 +820,7 @@ cmd_buffer_flush_gfx_state(struct anv_cmd_buffer *cmd_buffer)
 
    genX(cmd_buffer_emit_hashing_mode)(cmd_buffer, UINT_MAX, UINT_MAX, 1);
 
-   genX(flush_descriptor_buffers)(cmd_buffer, bind_state, gfx->active_stages);
+   genX(flush_binding_mode)(cmd_buffer, bind_state, gfx->active_stages);
 
    genX(flush_pipeline_select_3d)(cmd_buffer);
 
@@ -990,6 +992,7 @@ cmd_buffer_flush_gfx_state(struct anv_cmd_buffer *cmd_buffer)
 static inline void
 cmd_buffer_flush_gfx_pointers(struct anv_cmd_buffer *cmd_buffer)
 {
+   struct anv_device *device = cmd_buffer->device;
    struct anv_cmd_graphics_state *gfx = &cmd_buffer->state.gfx;
 
    assert(gfx->base != NULL);
@@ -1024,7 +1027,8 @@ cmd_buffer_flush_gfx_pointers(struct anv_cmd_buffer *cmd_buffer)
     * emitting push constants, on SKL+ we have to emit the corresponding
     * 3DSTATE_BINDING_TABLE_POINTER_* for the push constants to take effect.
     */
-   if (descriptors_dirty) {
+   if (descriptors_dirty &&
+       !(GFX_VERx10 >= 350 && device->physical->uses_efficient_64bit)) {
       cmd_buffer->state.descriptors_pointers_dirty |=
          genX(cmd_buffer_flush_descriptor_sets)(
             cmd_buffer,
@@ -1089,7 +1093,7 @@ genX(cmd_buffer_flush_gfx)(struct anv_cmd_buffer *cmd_buffer)
 ALWAYS_INLINE static bool
 anv_use_generated_draws(const struct anv_cmd_buffer *cmd_buffer, uint32_t count)
 {
-   const struct anv_instance *instance = cmd_buffer->device->physical->instance;
+   const struct anv_physical_device *pdevice = cmd_buffer->device->physical;
 
    /* We cannot generate readable commands in protected mode. */
    if (cmd_buffer->vk.pool->flags & VK_COMMAND_POOL_CREATE_PROTECTED_BIT)
@@ -1102,7 +1106,7 @@ anv_use_generated_draws(const struct anv_cmd_buffer *cmd_buffer, uint32_t count)
        anv_gfx_has_stage(&cmd_buffer->state.gfx, MESA_SHADER_TESS_CTRL))
       return false;
 
-   return count >= instance->drirc.perf.generated_indirect_threshold;
+   return count >= pdevice->drirc.perf.generated_indirect_threshold;
 }
 
 #define gfx_source_hashes(gfx) \
@@ -1909,6 +1913,17 @@ emit_indirect_draws(struct anv_cmd_buffer *cmd_buffer,
    const struct anv_cmd_graphics_state *gfx = &cmd_buffer->state.gfx;
    const struct brw_vs_prog_data *vs_prog_data = get_gfx_vs_prog_data(gfx);
 #endif
+
+#if GFX_VER >= 20
+   if (cmd_buffer->state.mi_indirect_data_needs_cs_stall) {
+      anv_add_pending_pipe_bits(cmd_buffer,
+                                VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                                VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                                ANV_PIPE_CS_STALL_BIT,
+                                "MI commands load indirect data");
+   }
+#endif
+
    cmd_buffer_flush_gfx(cmd_buffer);
 
    if (cmd_buffer->state.conditional_render_enabled)
@@ -1986,8 +2001,8 @@ static inline uint32_t xi_argument_format_for_vk_cmd(enum vk_cmd_type cmd)
 #endif
 }
 
-/* Return whether EXECUTE_INDIRECT_DRAW can unroll all the draw calls or
- * whether we need to emit the max count.
+/* Return whether EXECUTE_INDIRECT_DRAW can unroll all the draw calls (returns false)
+ * or whether we need to emit the max count (returns true).
  */
 static inline bool
 cmd_buffer_set_indirect_stride(struct anv_cmd_buffer *cmd_buffer,
@@ -2036,7 +2051,7 @@ cmd_buffer_set_indirect_stride(struct anv_cmd_buffer *cmd_buffer,
    /* Gfx20+ can accomodate any stride through programming STATE_BYTE_STRIDE,
     * ARL cannot unless indirect data is aligned.
     */
-   return GFX_VER >= 20 ? false : aligned;
+   return GFX_VER >= 20 ? false : !aligned;
 }
 
 static void

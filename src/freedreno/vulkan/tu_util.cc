@@ -57,6 +57,7 @@ static const struct debug_control tu_debug_options[] = {
    { "nocb", TU_DEBUG_NO_CONCURRENT_BINNING },
    { "forcecb", TU_DEBUG_FORCE_CONCURRENT_BINNING },
    { "computeroundrobin", TU_DEBUG_COMPUTE_ROUND_ROBIN },
+   { "gmem_warmup", TU_DEBUG_GMEM_WARMUP },
    { "deck_emu", TU_DEBUG_DECK_EMU },
    { "nolrzflip", TU_DEBUG_NOLRZFLIP },
    { "noclearlrzres", TU_DEBUG_NOCLEARLRZRES },

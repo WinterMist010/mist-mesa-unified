@@ -67,6 +67,7 @@
 PER_ARCH_FUNCS(6);
 PER_ARCH_FUNCS(7);
 PER_ARCH_FUNCS(10);
+PER_ARCH_FUNCS(11);
 PER_ARCH_FUNCS(12);
 PER_ARCH_FUNCS(13);
 PER_ARCH_FUNCS(14);
@@ -270,6 +271,15 @@ get_device_heaps(struct panvk_physical_device *device,
       };
    }
 
+   assert(device->memory.type_count < ARRAY_SIZE(device->memory.types));
+   host_coherent_not_cached_idx = device->memory.type_count;
+   device->memory.types[device->memory.type_count++] = (VkMemoryType){
+      .propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+      .heapIndex = 0,
+   };
+
    if (!PANVK_DEBUG(NO_WB_MMAP) &&
        (device->kmod.dev->props.supported_bo_flags & PAN_KMOD_BO_FLAG_WB_MMAP)) {
       assert(device->memory.type_count < ARRAY_SIZE(device->memory.types));
@@ -282,26 +292,18 @@ get_device_heaps(struct panvk_physical_device *device,
       };
    }
 
-   assert(device->memory.type_count < ARRAY_SIZE(device->memory.types));
-   host_coherent_not_cached_idx = device->memory.type_count;
-   device->memory.types[device->memory.type_count++] = (VkMemoryType) {
-      .propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
-                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-      .heapIndex = 0,
-   };
-
    /* Ideally, we'd place HOST_CACHED first for perf reasons, but there's
     * so many broken CTS tests (missing or invalid flush/invalidate
     * calls), and so many added at each version that it gets impossible to
     * catch up. So, keep things ordered in a way that the first HOST_VISIBLE
     * type is also the one requiring no CPU cache maintenance if we're asked
-    * to.
+    * to. The cached_before_coherent debug option is left to help investigate
+    * cpu cache related perf issues.
     */
-   if (PANVK_DEBUG(COHERENT_BEFORE_CACHED) &&
+   if (PANVK_DEBUG(CACHED_BEFORE_COHERENT) &&
        host_cached_not_coherent_idx != -1 &&
        host_coherent_not_cached_idx != -1 &&
-       host_coherent_not_cached_idx > host_cached_not_coherent_idx) {
+       host_coherent_not_cached_idx < host_cached_not_coherent_idx) {
       VkMemoryType host_cached_not_coherent_type =
          device->memory.types[host_cached_not_coherent_idx];
 
@@ -403,6 +405,7 @@ panvk_physical_device_init(struct panvk_physical_device *device,
    switch (arch) {
    case 6:
    case 7:
+   case 11:
    case 14:
       if (!os_get_option("PAN_I_WANT_A_BROKEN_VULKAN_DRIVER")) {
          result = panvk_errorf(instance, VK_ERROR_INCOMPATIBLE_DRIVER,
@@ -725,10 +728,10 @@ panvk_GetPhysicalDeviceMemoryProperties2(
           physical_device->memory.types[i];
    }
 
-   vk_foreach_struct(ext, pMemoryProperties->pNext) {
-      switch (ext->sType) {
+   vk_foreach_struct(sType, ext, pMemoryProperties->pNext) {
+      switch (sType) {
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT: {
-         VkPhysicalDeviceMemoryBudgetPropertiesEXT *p = (void *)ext;
+         VkPhysicalDeviceMemoryBudgetPropertiesEXT *p = ext;
 
          uint64_t used = p_atomic_read(&physical_device->memory.heap_used);
          uint64_t heap_size = physical_device->memory.heaps[0].size;
@@ -761,7 +764,7 @@ panvk_GetPhysicalDeviceMemoryProperties2(
          break;
       }
       default:
-         vk_debug_ignored_stype(ext->sType);
+         vk_debug_ignored_stype(sType);
          break;
       }
    }
@@ -1521,16 +1524,16 @@ panvk_GetPhysicalDeviceImageFormatProperties2(
       return result;
 
    /* Extract input structs */
-   vk_foreach_struct_const(s, base_info->pNext) {
-      switch (s->sType) {
+   vk_foreach_struct_const(sType, s, base_info->pNext) {
+      switch (sType) {
       case VK_STRUCTURE_TYPE_IMAGE_STENCIL_USAGE_CREATE_INFO:
-         stencil_usage_info = (const void*)s;
+         stencil_usage_info = s;
          break;
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO:
-         external_info = (const void *)s;
+         external_info = s;
          break;
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_VIEW_IMAGE_FORMAT_INFO_EXT:
-         image_view_info = (const void *)s;
+         image_view_info = s;
          break;
       default:
          break;
@@ -1538,19 +1541,19 @@ panvk_GetPhysicalDeviceImageFormatProperties2(
    }
 
    /* Extract output structs */
-   vk_foreach_struct(s, base_props->pNext) {
-      switch (s->sType) {
+   vk_foreach_struct(sType, s, base_props->pNext) {
+      switch (sType) {
       case VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES:
-         external_props = (void *)s;
+         external_props = s;
          break;
       case VK_STRUCTURE_TYPE_FILTER_CUBIC_IMAGE_VIEW_IMAGE_FORMAT_PROPERTIES_EXT:
-         cubic_props = (void *)s;
+         cubic_props = s;
          break;
       case VK_STRUCTURE_TYPE_HOST_IMAGE_COPY_DEVICE_PERFORMANCE_QUERY:
-         hic_props = (void *)s;
+         hic_props = s;
          break;
       case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_IMAGE_FORMAT_PROPERTIES:
-         ycbcr_props = (void *)s;
+         ycbcr_props = s;
          break;
       default:
          break;

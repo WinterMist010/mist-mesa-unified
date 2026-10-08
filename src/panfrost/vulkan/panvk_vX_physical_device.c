@@ -99,6 +99,7 @@ panvk_per_arch(get_physical_device_extensions)(
       .KHR_sampler_ycbcr_conversion = true,
       .KHR_separate_depth_stencil_layouts = true,
       .KHR_shader_clock = device->kmod.dev->props.gpu_can_query_timestamp,
+      .KHR_shader_constant_data = true,
       .KHR_shader_draw_parameters = true,
       .KHR_shader_expect_assume = true,
       .KHR_shader_float_controls = true,
@@ -219,7 +220,7 @@ panvk_per_arch(get_physical_device_extensions)(
       .EXT_swapchain_maintenance1 = true,
 #endif
       .EXT_texel_buffer_alignment = true,
-      .EXT_astc_decode_mode = PAN_ARCH >= 9,
+      .EXT_astc_decode_mode = PAN_ARCH >= 7,
       .EXT_texture_compression_astc_hdr = true,
       .EXT_tooling_info = true,
       .EXT_vertex_attribute_divisor = true,
@@ -423,7 +424,7 @@ panvk_per_arch(get_physical_device_features)(
       .vulkanMemoryModelDeviceScope = true,
       .vulkanMemoryModelAvailabilityVisibilityChains = true,
       .shaderOutputViewportIndex = false,
-      .shaderOutputLayer = false,
+      .shaderOutputLayer = PAN_ARCH >= 10,
       .subgroupBroadcastDynamicId = true,
 
       /* Vulkan 1.3 */
@@ -629,6 +630,9 @@ panvk_per_arch(get_physical_device_features)(
       /* VK_KHR_shader_clock */
       .shaderSubgroupClock = device->kmod.dev->props.gpu_can_query_timestamp,
       .shaderDeviceClock = device->kmod.dev->props.timestamp_device_coherent,
+
+      /* VK_KHR_shader_constant_data */
+      .shaderConstantData = true,
 
       /* VK_KHR_shader_quad_control */
       .shaderQuadControl = true,
@@ -1364,26 +1368,22 @@ panvk_per_arch(get_physical_device_properties)(
       VK_IMAGE_LAYOUT_PREINITIALIZED,
       VK_IMAGE_LAYOUT_ZERO_INITIALIZED_EXT,
 
-      /* Only if vk1.1+ is supported */
-#if PAN_ARCH >= 10
-      /*  Vulkan 1.1 */
+      /*  Vulkan 1.1 or VK_KHR_maintenance2 */
       VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL,
       VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL,
 
-      /*  Vulkan 1.2 */
+      /*  Vulkan 1.2 or VK_KHR_separate_depth_stencil_layouts */
       VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
       VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
       VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL,
       VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL,
 
-      /* Vulkan 1.3 */
+      /* Vulkan 1.3 or VK_KHR_synchronization2 */
       VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL,
       VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
 
-      /* Vulkan 1.4 */
+      /* Vulkan 1.4 or VK_KHR_dynamic_rendering_local_read */
       VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ,
-
-#endif
 
       /* VK_EXT_attachment_feedback_loop_layout */
       VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT,

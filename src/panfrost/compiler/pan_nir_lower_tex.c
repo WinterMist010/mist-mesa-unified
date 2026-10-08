@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "pan_compiler.h"
 #include "pan_nir.h"
 #include "bifrost/bifrost.h"
 #include "bifrost/valhall/valhall.h"
@@ -168,13 +169,6 @@ scalar_as_imm_i4(nir_scalar s)
 {
    return nir_scalar_as_uint(s) & 0xf;
 }
-
-#define PAN_AS_U32(x) ({\
-   static_assert(sizeof(x) == 4, "x must be 4 bytes"); \
-   uint32_t _u; \
-   memcpy(&_u, &(x), 4); \
-   _u; \
-})
 
 static bool
 bi_lower_txf_buf(nir_builder *b, nir_tex_instr *tex, uint64_t gpu_id)
@@ -824,17 +818,24 @@ va_lower_tex(nir_builder *b, nir_tex_instr *tex, uint64_t gpu_id)
    const unsigned coord_comps = tex->coord_components - tex->is_array;
    if (tex->sampler_dim == GLSL_SAMPLER_DIM_CUBE) {
       assert(coord_comps == 3);
-      nir_def *desc = build_cube_desc(b, srcs.coord);
-      sr[VA_TEX_SR_COORD_S] = nir_channel(b, desc, 0);
-      sr[VA_TEX_SR_COORD_T] = nir_channel(b, desc, 1);
+      bool is_kraid = pan_use_kraid(pan_arch(gpu_id), b->shader->info.stage,
+                                     b->shader->info.internal);
+      if (pan_arch(gpu_id) >= 11 && is_kraid) {
+         flags.projection_enable = true;
+         for (unsigned i = 0; i < coord_comps; i++)
+            sr[VA_TEX_SR_COORD_S + i] = nir_channel(b, srcs.coord, i);
+      } else {
+         nir_def *desc = build_cube_desc(b, srcs.coord);
+         sr[VA_TEX_SR_COORD_S] = nir_channel(b, desc, 0);
+         sr[VA_TEX_SR_COORD_T] = nir_channel(b, desc, 1);
+      }
    } else {
       for (unsigned i = 0; i < coord_comps; i++)
          sr[VA_TEX_SR_COORD_S + i] = nir_channel(b, srcs.coord, i);
    }
 
    if (tex->is_array) {
-      nir_scalar arr_idx = nir_get_scalar(srcs.coord, coord_comps);
-      arr_idx = nir_scalar_chase_movs(arr_idx);
+      nir_scalar arr_idx = nir_scalar_resolved(srcs.coord, coord_comps);
       /* On v11+, narrow_array_index is a U4 in bits [15:12]
        *
        * On v9 and v10, narrow_array_index is a U16 in bits [31:16].  However,
@@ -872,21 +873,19 @@ va_lower_tex(nir_builder *b, nir_tex_instr *tex, uint64_t gpu_id)
       if (srcs.offset) {
          assert(srcs.offset->num_components == coord_comps);
          for (unsigned i = 0; i < coord_comps; i++)
-            comps[i] = nir_get_scalar(srcs.offset, i);
+            comps[i] = nir_scalar_resolved(srcs.offset, i);
       }
 
       /* The MS index goes in .z */
       if (srcs.ms_idx) {
          assert(coord_comps == 2);
-         comps[2] = nir_get_scalar(srcs.ms_idx, 0);
+         comps[2] = nir_scalar_resolved(srcs.ms_idx, 0);
       }
 
       uint32_t narrow_offset = 0;
       bool is_narrow = true;
       for (unsigned i = 0; i < ARRAY_SIZE(comps); i++) {
          if (comps[i].def) {
-            comps[i] = nir_scalar_chase_movs(comps[i]);
-
             if (scalar_is_imm_i4(comps[i], true)) {
                narrow_offset |= scalar_as_imm_i4(comps[i]) << (i * 4);
             } else {
@@ -989,8 +988,15 @@ va_lower_lod(nir_builder *b, nir_tex_instr *tex, uint64_t gpu_id)
    tex_h = nir_pad_vector_imm_int(b, tex_h, 0, 2);
 
    nir_def *coord = srcs.coord;
-   if (tex->sampler_dim == GLSL_SAMPLER_DIM_CUBE)
-      coord = build_cube_desc(b, coord);
+   if (tex->sampler_dim == GLSL_SAMPLER_DIM_CUBE) {
+      bool is_kraid = pan_use_kraid(pan_arch(gpu_id), b->shader->info.stage,
+                                     b->shader->info.internal);
+      if (pan_arch(gpu_id) >= 11 && is_kraid) {
+         flags.projection_enable = true;
+      } else {
+         coord = build_cube_desc(b, coord);
+      }
+   }
 
    nir_def *grdesc = nir_build_tex(b, nir_texop_gradient_pan,
                                     .dim = tex->sampler_dim,

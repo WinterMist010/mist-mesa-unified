@@ -124,15 +124,19 @@ nir_io_offset_iadd(nir_builder *b, nir_intrinsic_instr *intr,
          base_shift = 0;
          offset_shift = cur_offset_shift;
       } else {
-         /* TODO add support for adjusting the base index. */
-         assert(!nir_intrinsic_has_base(intr) || nir_intrinsic_base(intr) == 0);
+         unsigned offset = offset_diff_bytes;
+
+         if (nir_intrinsic_has_base(intr)) {
+            offset += nir_intrinsic_base(intr) << cur_offset_shift;
+            nir_intrinsic_set_base(intr, 0);
+         }
 
          /* Otherwise, we have to lower offset_shift in order to not lose
           * precision. We also have to shift the original base offset left to
           * make sure it uses the same units.
           */
-         offset_shift = ffs(offset_diff_bytes) - 1;
-         offset_diff = offset_diff_bytes >> offset_shift;
+         offset_shift = ffs(offset) - 1;
+         offset_diff = offset >> offset_shift;
          base_shift = cur_offset_shift - offset_shift;
       }
    } else {
@@ -1471,7 +1475,7 @@ nir_lower_io_passes(nir_shader *nir, bool renumber_vs_inputs)
    /* This must be called after folding constant offset srcs. */
    if (nir->info.stage != MESA_SHADER_MESH &&
        !(nir->options->support_indirect_inputs & BITFIELD_BIT(nir->info.stage)))
-      NIR_PASS(_, nir, nir_lower_io_indirect_loads, nir_var_shader_in, false);
+      NIR_PASS(_, nir, nir_lower_io_indirect_loads, nir_var_shader_in, 0);
 
    /* Lower and remove dead derefs and variables to clean up the IR. */
    NIR_PASS(_, nir, nir_lower_vars_to_ssa);

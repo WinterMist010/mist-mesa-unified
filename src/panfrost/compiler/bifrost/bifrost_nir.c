@@ -359,6 +359,10 @@ bi_optimize_late(nir_shader *nir, uint64_t gpu_id,
    if (pan_arch(gpu_id) < 9)
       NIR_PASS(_, nir, bifrost_nir_opt_boolean_bitwise);
 
+   /* Hoist loop-invariant code out of loops */
+   NIR_PASS(_, nir, nir_opt_gcm, false /* value_number */);
+   NIR_PASS(_, nir, nir_opt_dce);
+
    NIR_PASS(_, nir, pan_nir_lower_bool_to_bitsize);
    NIR_PASS(_, nir, nir_lower_alu_width, bi_vectorize_filter, &gpu_id);
    NIR_PASS(_, nir, nir_opt_vectorize, bi_vectorize_filter, &gpu_id);
@@ -384,13 +388,8 @@ bi_optimize_late(nir_shader *nir, uint64_t gpu_id,
 
    /* Backend scheduler is purely local, so do some global optimizations
     * to reduce register pressure. */
-   nir_move_options move_all = nir_move_const_undef | nir_move_load_ubo |
-                               nir_move_load_input | nir_move_load_frag_coord |
-                               nir_move_comparisons | nir_move_copies |
-                               nir_move_load_ssbo;
-
-   NIR_PASS(_, nir, nir_opt_sink, move_all);
-   NIR_PASS(_, nir, nir_opt_move, move_all);
+   NIR_PASS(_, nir, nir_opt_sink, nir_move_all);
+   NIR_PASS(_, nir, nir_opt_move, nir_move_all);
 
    /* We might lower attribute, varying, and image indirects. Use the
     * gathered info to skip the extra analysis in the happy path. */
@@ -829,19 +828,13 @@ bifrost_postprocess_nir(nir_shader *nir,
    NIR_PASS(_, nir, pan_nir_lower_buf_image_access, gpu_arch);
 
    /* We assume that UBO and SSBO were lowered, let's move things around. */
-   nir_move_options move_all = nir_move_const_undef | nir_move_load_ubo |
-                               nir_move_comparisons | nir_move_copies |
-                               nir_move_load_ssbo;
-
-   NIR_PASS(_, nir, nir_opt_sink, move_all);
-   NIR_PASS(_, nir, nir_opt_move, move_all);
+   NIR_PASS(_, nir, nir_opt_sink, nir_move_all);
+   NIR_PASS(_, nir, nir_opt_move, nir_move_all);
 
    if (nir->info.stage == MESA_SHADER_FRAGMENT) {
       NIR_PASS(_, nir, nir_lower_is_helper_invocation);
       NIR_PASS(_, nir, pan_nir_lower_helper_invocation);
       NIR_PASS(_, nir, pan_nir_lower_sample_pos);
-      NIR_PASS(_, nir, pan_nir_lower_noperspective_fs,
-               &info->varyings.noperspective);
       NIR_PASS(_, nir, nir_lower_frag_coord_to_pixel_coord);
       NIR_PASS(_, nir, pan_nir_lower_var_special_pan);
 
@@ -1239,6 +1232,170 @@ bifrost_nir_lower_vs_atomics(nir_shader *shader)
                                      nir_metadata_none, NULL);
 }
 
+/* This creates the inital rough shape of a unified IDVS shader:
+ *
+ * %0 = @load_shader_output_pan
+ * if %0 & VA_SHADER_OUTPUT_POSITON_BIT {
+ *    <substituted copy of input impl>
+ * }
+ * if %0 & VA_SHADER_OUTPUT_ATTRIB_BIT {
+ *    <substituted copy of input impl>
+ * }
+ * if %0 & VA_SHADER_OUTPUT_VARY_BIT {
+ *    <substituted copy of input impl>
+ * }
+ *
+ * It needs to be followed by other passes for cleaning up.
+ */
+static bool
+bifrost_make_unified_idvs_shader(nir_shader *nir)
+{
+   nir_function_impl *impl = nir_shader_get_entrypoint(nir);
+
+   nir_cf_list old_blocks;
+   nir_cf_extract(&old_blocks, nir_before_impl(impl), nir_after_impl(impl));
+
+   /* Make a new main block. */
+   nir_cf_node_insert_begin(&impl->body, &nir_block_create(impl)->cf_node);
+
+   nir_builder builder = nir_builder_create(impl);
+   nir_builder *b = &builder;
+   b->cursor = nir_before_impl(impl);
+   nir_def *shader_output = nir_load_shader_output_pan(b);
+
+   nir_block *out_blocks[VA_SHADER_OUTPUT_COUNT] = {NULL};
+
+   for (enum va_shader_output out = 0; out < VA_SHADER_OUTPUT_COUNT; ++out) {
+      nir_def *cond =
+         nir_i2b(b, nir_iand_imm(b, shader_output, BITFIELD_BIT(out)));
+      nir_if *nif = nir_push_if(b, cond);
+      nir_cf_list_clone_and_reinsert(&old_blocks, &nif->cf_node, b->cursor,
+                                     NULL);
+      nir_pop_if(b, NULL);
+
+      out_blocks[out] = nir_if_first_then_block(nif);
+   }
+
+   /* After messing around with the CFG, reindex blocks. */
+   nir_index_blocks(impl);
+
+   /* This is more or less what nir_inline_sysval does, except that it uses a
+    * different constant depending on which of the out_blocks the intrinsic
+    * instruction is in.
+    */
+   for (enum va_shader_output out = 0; out < VA_SHADER_OUTPUT_COUNT; ++out) {
+      nir_block *out_block = out_blocks[out];
+      assert(out_block);
+
+      nir_foreach_block_in_cf_node_safe(block, &out_block->cf_node) {
+         nir_foreach_instr_safe(instr, block) {
+            if (instr->type != nir_instr_type_intrinsic)
+               continue;
+
+            nir_intrinsic_instr *intr = nir_instr_as_intrinsic(instr);
+            if (intr->intrinsic != nir_intrinsic_load_shader_output_pan)
+               continue;
+
+            b->cursor = nir_before_instr(&intr->instr);
+            nir_def_replace(&intr->def, nir_imm_intN_t(b, BITFIELD_BIT(out),
+                                                       intr->def.bit_size));
+         }
+      }
+   }
+
+   nir_progress(true, impl, nir_metadata_none);
+
+   return true;
+}
+
+static void
+bifrost_handle_unified_idvs_shader(nir_shader *nir)
+{
+   NIR_PASS(_, nir, bifrost_make_unified_idvs_shader);
+
+   /* Clean up from specializing inside the previous pass. */
+   bool progress = true;
+   while (progress) {
+      progress = false;
+      NIR_PASS(progress, nir, nir_opt_constant_folding);
+      NIR_PASS(progress, nir, nir_opt_dce);
+      NIR_PASS(progress, nir, nir_opt_dead_cf);
+      NIR_PASS(progress, nir, nir_opt_cse);
+   }
+
+   /* Hoist common values before the predicated blocks. */
+   NIR_PASS(_, nir, nir_opt_gcm, true);
+}
+
+static const char *
+idvs_variant_suffix(enum bi_idvs_mode idvs)
+{
+   switch (idvs) {
+   case BI_IDVS_VARYING:
+      return "_var";
+   case BI_IDVS_POSITION:
+      return "_pos";
+   case BI_IDVS_ALL:
+      return "_all";
+   case BI_IDVS_NONE:
+      return "";
+   default:
+      return "invalid";
+   }
+}
+
+static void
+bifrost_dump_shader(nir_shader *nir, struct util_dynarray *binary,
+                    enum bi_idvs_mode idvs, uint32_t offset, uint32_t size)
+{
+   const char *dump_dir = os_get_option_secure("BIFROST_MESA_DUMP_DIR");
+   if (dump_dir == NULL)
+      return;
+
+   bool has_src_blake3 = false;
+   for (uint32_t i = 0; i < BLAKE3_OUT_LEN && !has_src_blake3; ++i)
+      has_src_blake3 |= nir->info.source_blake3[i] != 0;
+
+   /* Only shaders with a unique source identifier can be dumped. */
+   if (!has_src_blake3) {
+      fprintf(
+         stderr,
+         "Warning: Skip dump of shader %s (stage=%s) without source hash\n",
+         nir->info.name ?: "<unnamed>",
+         _mesa_shader_stage_to_abbrev(nir->info.stage));
+      return;
+   }
+
+   const char *id = NULL;
+   char blake3_str[BLAKE3_HEX_LEN] = {0};
+   _mesa_blake3_format(blake3_str, nir->info.source_blake3);
+   id = &blake3_str[0];
+
+   char path[PATH_MAX + 1] = {0};
+   snprintf(path, sizeof(path), "%s/%s.%s%s.bin", dump_dir, id,
+            _mesa_shader_stage_to_file_ext(nir->info.stage),
+            idvs_variant_suffix(idvs));
+
+   FILE *dump_stream = fopen(path, "w");
+
+   unsigned written = 0;
+   if (dump_stream) {
+      char* ptr = ((char*)binary->data) + offset;
+      written = fwrite(ptr, sizeof(char), size, dump_stream);
+   }
+
+   if (written == size) {
+      fprintf(stderr, "PAN: Dumped shader %s to %s\n",
+              nir->info.name ?: "<unnamed>", path);
+   } else {
+      fprintf(stderr, "PAN: Failed to dump %s to %s\n",
+              nir->info.name ?: "<unnamed>", path);
+   }
+
+   if (dump_stream)
+      fclose(dump_stream);
+}
+
 void
 bifrost_compile_shader_nir(nir_shader *nir,
                            const struct pan_compile_inputs *inputs,
@@ -1248,6 +1405,13 @@ bifrost_compile_shader_nir(nir_shader *nir,
    MESA_TRACE_FUNC();
 
    bifrost_init_debug_options();
+
+   /* Apply special transformation to IDVS_ALL shaders before late
+    * optimization loop. */
+   if (nir->info.stage == MESA_SHADER_VERTEX && info->vs.idvs &&
+       (pan_arch(inputs->gpu_id) >= 12)) {
+      bifrost_handle_unified_idvs_shader(nir);
+   }
 
    bi_optimize_late(nir, inputs->gpu_id, info);
 
@@ -1287,6 +1451,21 @@ bifrost_compile_shader_nir(nir_shader *nir,
       }
    } else {
       bi_compile_variant(nir, inputs, binary, info, BI_IDVS_NONE);
+   }
+
+   /* Based on the provided info, dump the binary/-ies. */
+   if (info->stage == MESA_SHADER_VERTEX && info->vs.idvs) {
+      enum bi_idvs_mode mode =
+         pan_arch(inputs->gpu_id) >= 12 ? BI_IDVS_ALL : BI_IDVS_POSITION;
+      uint32_t size_prim = info->vs.secondary_offset ?: binary->size;
+      bifrost_dump_shader(nir, binary, mode, 0, size_prim);
+      if (info->vs.secondary_enable && mode != BI_IDVS_ALL) {
+         uint32_t offs = info->vs.secondary_offset;
+         uint32_t size_sec = binary->size - offs;
+         bifrost_dump_shader(nir, binary, BI_IDVS_VARYING, offs, size_sec);
+      }
+   } else {
+      bifrost_dump_shader(nir, binary, BI_IDVS_NONE, 0, binary->size);
    }
 
    info->ubo_mask &= (1 << nir->info.num_ubos) - 1;

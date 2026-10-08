@@ -256,11 +256,11 @@ vn_device_memory_fix_alloc_info(
    struct vn_device_memory_alloc_info *local_info)
 {
    local_info->alloc = *alloc_info;
-   VkBaseOutStructure *cur = (void *)&local_info->alloc;
+   void *cur = (void *)&local_info->alloc;
 
-   vk_foreach_struct_const(src, alloc_info->pNext) {
+   vk_foreach_struct_const(sType, src, alloc_info->pNext) {
       void *next = NULL;
-      switch (src->sType) {
+      switch (sType) {
       case VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO:
          /* guest vram turns export alloc into import, so drop export info */
          if (has_guest_vram)
@@ -286,12 +286,12 @@ vn_device_memory_fix_alloc_info(
       }
 
       if (next) {
-         cur->pNext = next;
+         vk_pnext_set_next(cur, next);
          cur = next;
       }
    }
 
-   cur->pNext = NULL;
+   vk_pnext_set_next(cur, NULL);
 
    return &local_info->alloc;
 }

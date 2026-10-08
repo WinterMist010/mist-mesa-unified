@@ -361,7 +361,7 @@ with_vdrm = [
 
 if with_virtio_vk
   dep_venus_protocol = dependency('venus-protocol',
-    version : '== 1.0',
+    version : '== 1.1.3',
     fallback : ['venus-protocol', 'dep_vn_protocol_driver'],
     required : true
   )
@@ -968,7 +968,9 @@ if with_gallium_rusticl or with_nouveau_vk or with_tools.contains('etnaviv') or 
   bindgen_bad_versions = [
     # unknown covers buggy 0.69.0, 0.71.0
     'unknown',
-    '0.72.0',
+    '0.72.0', # https://github.com/rust-lang/rust-bindgen/issues/3264
+    '0.73.0', # https://github.com/rust-lang/rust-bindgen/issues/3454
+    '0.73.1', # https://github.com/rust-lang/rust-bindgen/issues/3454
   ]
   if bindgen_version in bindgen_bad_versions
     error('Your bingden version is known to be buggy, please upgrade it. ' +
@@ -1229,10 +1231,6 @@ endif
 
 if has_yaml.returncode() != 0
   error('Python (3.x) yaml module (PyYAML) required to build mesa.')
-endif
-
-if cc.get_id() == 'gcc' and cc.version().version_compare('< 4.4.6')
-  error('When using GCC, version 4.4.6 or later is required.')
 endif
 
 # Support systems without ETIME (e.g. FreeBSD)
@@ -1982,9 +1980,9 @@ endif
 if with_clc
   llvm_modules += ['coverage', 'target', 'linker', 'irreader', 'option', 'libdriver', 'lto']
   # all-targets is needed to support static linking LLVM build with multiple targets.
-  # windowsdriver is needded with LLVM>=15 and frontendhlsl is needed with LLVM>=16,
+  # windowsdriver is needded with LLVM>=15, frontendhlsl with LLVM>=16, frontenddriver with LLVM>=18 and abi with LLVM>=23,
   # but we don't know what LLVM version we are using yet
-  llvm_optional_modules += ['all-targets', 'windowsdriver', 'frontendhlsl', 'frontenddriver']
+  llvm_optional_modules += ['all-targets', 'windowsdriver', 'frontendhlsl', 'frontenddriver', 'abi']
 endif
 if draw_with_llvm
   llvm_modules += 'native'

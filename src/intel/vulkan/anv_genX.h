@@ -216,9 +216,9 @@ void genX(emit_l3_config)(struct anv_batch *batch,
 void genX(cmd_buffer_config_l3)(struct anv_cmd_buffer *cmd_buffer,
                                 const struct intel_l3_config *cfg);
 
-void genX(flush_descriptor_buffers)(struct anv_cmd_buffer *cmd_buffer,
-                                    struct anv_bind_point_state *bind_state,
-                                    VkShaderStageFlags active_stages);
+void genX(flush_binding_mode)(struct anv_cmd_buffer *cmd_buffer,
+                              struct anv_bind_point_state *bind_state,
+                              VkShaderStageFlags active_stages);
 
 uint32_t
 genX(cmd_buffer_flush_descriptor_sets)(struct anv_cmd_buffer *cmd_buffer,
@@ -439,10 +439,6 @@ genX(cmd_buffer_begin_companion_rcs_syncpoint)(struct anv_cmd_buffer *cmd_buffer
 void
 genX(cmd_buffer_end_companion_rcs_syncpoint)(struct anv_cmd_buffer *cmd_buffer,
                                              struct anv_state syncpoint);
-void
-genX(cmd_write_buffer_cp)(struct anv_cmd_buffer *cmd_buffer,
-                          VkDeviceAddress dstAddr,
-                          void *data, uint32_t size);
 
 void
 genX(emit_simple_shader_init)(struct anv_simple_shader *state);
@@ -580,7 +576,7 @@ genX(cmd_buffer_rhwo_wa_14024015672)(struct anv_cmd_buffer *cmd_buffer,
 {
    struct anv_device *device = cmd_buffer->device;
    const bool rhwo_opt_enable =
-      !device->physical->instance->drirc.debug.wa_14024015672_msaa &&
+      !device->physical->drirc.debug.wa_14024015672_msaa &&
       msaa_enabled;
    if (intel_needs_workaround(device->info, 14024015672) &&
        cmd_buffer->state.pending_rhwo_optimization_enabled != rhwo_opt_enable)
@@ -630,3 +626,5 @@ genX(anv_get_btd_dispatch_timeout_counter)(uint32_t dispatch_timeout_counter)
 
    return clamped_timeout_counter;
 }
+
+uint32_t genX(compute_walker2_get_stack_id_control_value)(const struct anv_device *device);

@@ -1,6 +1,7 @@
 // Copyright © 2026 Collabora, Ltd.
 // SPDX-License-Identifier: MIT
 
+use crate::data_type::NumericType;
 use crate::debug::*;
 use crate::ir::*;
 use crate::model::model_for_gpu_id;
@@ -98,6 +99,7 @@ fn nir_opts(arch: u8, merge_wg: bool) -> nir_shader_compiler_options {
             0
         },
         lower_mediump_io: Some(pan_nir_lower_mediump_io),
+        io_options: nir_io_has_intrinsics | nir_io_non_interpolated_as_uint,
         ..Default::default()
     }
 }
@@ -140,6 +142,7 @@ fn dynarray_append_vec<T: Copy>(buf: &mut util_dynarray, vec: Vec<T>) {
 }
 
 fn write_back_info(
+    model: &dyn Model,
     src: &ShaderInfo,
     nir: &nir_shader,
     dst: &mut pan_shader_info,
@@ -148,6 +151,33 @@ fn write_back_info(
     dst.tls_size = src.tls_size;
     dst.preload = src.register_preload;
     dst.has_shader_clk_instr = src.has_ld_gclk;
+
+    if model.arch() >= 9 {
+        let bifrost_info = unsafe { dst.__bindgen_anon_2.bifrost.as_mut() };
+        bifrost_info.uses_flat_shading = src.uses_flat_shading;
+
+        if nir.info.stage() == MESA_SHADER_FRAGMENT {
+            let translate_color = |dt: &Option<DataType>| {
+                let Some(dt) = dt else {
+                    return nir_type_invalid;
+                };
+                let num_type = match dt.num_type() {
+                    NumericType::SignedInteger => nir_type_int,
+                    NumericType::UnsignedInteger => nir_type_uint,
+                    NumericType::Float => nir_type_float,
+                    _ => panic!("Invalid color data type"),
+                };
+                num_type | dt.bits()
+            };
+
+            for (i, btype) in src.blend_types.iter().enumerate() {
+                bifrost_info.blend[i].type_ = translate_color(btype);
+            }
+            bifrost_info.blend_src1_type = translate_color(&src.blend1_type);
+        }
+    } else {
+        panic!("Unsupported GPU generation");
+    }
 
     if nir.info.stage() == MESA_SHADER_VERTEX {
         // TODO: only for BI_IDVS_ALL (only one supported right now)
@@ -206,18 +236,25 @@ pub extern "C" fn kraid_compile_nir(
         eprint!("{}", nir.to_string().unwrap());
     }
 
-    let mut s = Shader::from_nir(model.as_ref(), nir);
+    let mut s = Shader::from_nir(model.as_ref(), nir, inputs);
     s.run_pass("after translation from NIR", |_| {});
 
     pass!(s.remat_constants());
     pass!(s.widen_alu_ops());
     pass!(s.legalize_src_swizzles());
     pass!(s.opt_copy_prop());
+    while pass!(s.opt_dst_mod_prop()) {
+        pass!(s.opt_copy_prop());
+    }
     pass!(s.lower_mkvec_swz());
+    pass!(s.opt_var());
     pass!(s.opt_dce());
     pass!(s.lower_small_constants());
-    pass!(s.opt_promote_consts(&mut info.fau));
+    if inputs.fau.promote_immediates {
+        pass!(s.opt_promote_consts(&mut info.fau));
+    }
     pass!(s.legalize());
+    pass!(s.schedule_for_pressure());
     // Shader::assign_registers() uses pass!() internally
     s.assign_registers();
     pass!(s.lower_copy());
@@ -230,15 +267,35 @@ pub extern "C" fn kraid_compile_nir(
     // These have to happen last since we can't remove any instructions after
     // they've completed.
     pass!(s.assign_message_slots());
+    pass!(s.insert_required_waits());
     pass!(s.mark_reconvergence());
+    pass!(s.opt_flow());
 
-    info.stats = s.get_stats();
+    if !s.is_empty() {
+        info.stats = s.get_stats();
+        pass!(s.lower_blend_call());
 
-    let bin = model.encode_shader(&s);
-    dynarray_append_vec(binary, bin);
+        let bin = model.encode_shader(&s);
+        let code_size = std::mem::size_of_val(&bin[..]);
+        dynarray_append_vec(binary, bin);
 
-    encode_no_psiz_variant(nir, &mut s, model.as_ref(), binary, info);
+        encode_no_psiz_variant(nir, &mut s, model.as_ref(), binary, info);
 
-    write_back_info(&s.info, nir, info);
+        if info.stats.isa == PAN_STAT_VALHALL {
+            info.stats.__bindgen_anon_1.valhall.code_size =
+                code_size.try_into().unwrap();
+        } else {
+            panic!("Unsupported ISA");
+        }
+    } else {
+        info.stats = pan_stats {
+            isa: PAN_STAT_VALHALL,
+            __bindgen_anon_1: pan_stats__bindgen_ty_1 {
+                valhall: valhall_stats::default(),
+            },
+        }
+    }
+
+    write_back_info(model.as_ref(), &s.info, nir, info);
     unsafe { pan_shader_update_info(info, nir, inputs) };
 }

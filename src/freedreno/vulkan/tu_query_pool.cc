@@ -27,7 +27,7 @@
 
 #define NSEC_PER_SEC 1000000000ull
 #define WAIT_TIMEOUT 5
-#define __COUNTER_REG(CHIP, name) __RBBM_PIPESTAT_ ## name <CHIP>({}).reg
+#define __COUNTER_REG(CHIP, name) __RBBM_PIPESTAT_ ## name <CHIP>({})
 #define COUNTER_REG(name) __COUNTER_REG(CHIP, name)
 
 /* Note: gen8 changes the order of the pipestat regs, but in either case
@@ -39,13 +39,13 @@
  * Depending on how/if they shuffle around in the future, we might need
  * to shift to reading them individually, like gallium does.
  */
-#define STAT_COUNT ((__COUNTER_REG(A6XX, CSINVOCATIONS) - __COUNTER_REG(A6XX, IAVERTICES)) / 2 + 1)
+#define STAT_COUNT ((__COUNTER_REG(A6XX, CSINVOCATIONS).reg - __COUNTER_REG(A6XX, IAVERTICES).reg) / 2 + 1)
 
-struct PACKED query_slot {
-   uint64_t available;
-};
+struct alignas(8) query_slot {
+   alignas(8) uint64_t available;
+} PACKED;
 
-struct PACKED occlusion_query_slot {
+struct alignas(8) occlusion_query_slot {
    struct query_slot common;
    uint64_t _padding0;
 
@@ -53,26 +53,26 @@ struct PACKED occlusion_query_slot {
    uint64_t result;
    uint64_t end;
    uint64_t _padding1;
-};
+} PACKED;
 
-struct PACKED timestamp_query_slot {
+struct alignas(8) timestamp_query_slot {
    struct query_slot common;
    uint64_t result;
-};
+} PACKED;
 
-struct PACKED primitive_slot_value {
+struct alignas(8) primitive_slot_value {
    uint64_t values[2];
-};
+} PACKED;
 
-struct PACKED pipeline_stat_query_slot {
+struct alignas(8) pipeline_stat_query_slot {
    struct query_slot common;
    uint64_t results[STAT_COUNT];
 
    uint64_t begin[STAT_COUNT];
    uint64_t end[STAT_COUNT];
-};
+} PACKED;
 
-struct PACKED primitive_query_slot {
+struct alignas(8) primitive_query_slot {
    struct query_slot common;
    /* The result of transform feedback queries is two integer values:
     *   results[0] is the count of primitives written,
@@ -86,30 +86,30 @@ struct PACKED primitive_query_slot {
 
    struct primitive_slot_value begin[4];
    struct primitive_slot_value end[4];
-};
+} PACKED;
 
-struct PACKED perfcntr_query_slot {
+struct alignas(8) perfcntr_query_slot {
    uint64_t result;
    uint64_t begin;
    uint64_t end;
-};
+} PACKED;
 
-struct PACKED perf_query_raw_slot {
+struct alignas(8) perf_query_raw_slot {
    struct query_slot common;
    struct perfcntr_query_slot perfcntr;
-};
+} PACKED;
 
-struct PACKED primitives_generated_query_slot {
+struct alignas(8) primitives_generated_query_slot {
    struct query_slot common;
    uint64_t result;
    uint64_t begin;
    uint64_t end;
-};
+} PACKED;
 
-struct PACKED accel_struct_slot {
+struct alignas(8) accel_struct_slot {
    struct query_slot common;
    uint64_t result;
-};
+} PACKED;
 
 /* Returns the IOVA or mapped address of a given uint64_t field
  * in a given slot of a query pool. */
@@ -167,7 +167,7 @@ struct PACKED accel_struct_slot {
    (uint64_t *) ((char *) pool->bo->map + pool->query_stride * (query) +   \
                  sizeof(struct query_slot) + sizeof(type) * (i))
 
-#define query_is_available(slot) slot->available
+#define query_is_available(slot) p_atomic_read(&slot->available)
 
 static const VkPerformanceCounterUnitKHR
 fd_perfcntr_type_to_vk_unit[] = {
@@ -542,7 +542,7 @@ statistics_index(uint32_t *statistics)
    uint32_t stat;
    stat = u_bit_scan(statistics);
 
-#define COUNTER_OFFSET(name) ((COUNTER_REG(name) - COUNTER_REG(IAVERTICES)) / 2)
+#define COUNTER_OFFSET(name) ((COUNTER_REG(name).reg - COUNTER_REG(IAVERTICES).reg) / 2)
 
    switch (1 << stat) {
    case VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_VERTICES_BIT:
@@ -942,6 +942,9 @@ emit_copy_query_pool_results(struct tu_cmd_buffer *cmdbuf,
                               result_count /* offset */, flags);
       }
    }
+
+   /* Make sure the result of this copy is visible to others. */
+   tu_flush_for_access<CHIP>(&cmdbuf->state.cache, TU_ACCESS_CP_WRITE, TU_ACCESS_NONE);
 }
 
 template <chip CHIP>
@@ -982,22 +985,15 @@ tu_CmdCopyQueryPoolResults(VkCommandBuffer commandBuffer,
 }
 TU_GENX(tu_CmdCopyQueryPoolResults);
 
-template <chip CHIP>
+template <chip CHIP, typename ResetIova>
 static void
-emit_reset_query_pool(struct tu_cmd_buffer *cmdbuf,
-                      struct tu_query_pool *pool,
-                      uint32_t firstQuery,
-                      uint32_t queryCount)
+reset_query_pool(struct tu_query_pool *pool, uint32_t firstQuery, uint32_t queryCount, ResetIova reset_iova)
 {
-   struct tu_cs *cs = &cmdbuf->cs;
-
    for (uint32_t i = 0; i < queryCount; i++) {
       uint32_t query = firstQuery + i;
       uint32_t statistics = pool->vk.pipeline_statistics;
 
-      tu_cs_emit_pkt7(cs, CP_MEM_WRITE, 4);
-      tu_cs_emit_qw(cs, query_available_iova(pool, query));
-      tu_cs_emit_qw(cs, 0x0);
+      reset_iova(query_available_iova(pool, query));
 
       for (uint32_t k = 0; k < get_result_count(pool); k++) {
          uint64_t result_iova;
@@ -1015,9 +1011,7 @@ emit_reset_query_pool(struct tu_cmd_buffer *cmdbuf,
             result_iova = query_result_iova(pool, query, uint64_t, k);
          }
 
-         tu_cs_emit_pkt7(cs, CP_MEM_WRITE, 4);
-         tu_cs_emit_qw(cs, result_iova);
-         tu_cs_emit_qw(cs, 0x0);
+         reset_iova(result_iova);
       }
 
       if (is_perf_query_derived(pool)) {
@@ -1028,13 +1022,23 @@ emit_reset_query_pool(struct tu_cmd_buffer *cmdbuf,
 
          for (uint32_t j = 0; j < perf_query->collection->num_enabled_perfcntrs; ++j) {
             uint64_t perfcntr_result_iova = perf_query_derived_perfcntr_iova(pool, query, result, j);
-            tu_cs_emit_pkt7(cs, CP_MEM_WRITE, 4);
-            tu_cs_emit_qw(cs, perfcntr_result_iova);
-            tu_cs_emit_qw(cs, 0x00);
+            reset_iova(perfcntr_result_iova);
          }
       }
    }
+}
 
+template <chip CHIP>
+static void
+emit_reset_query_pool(struct tu_cmd_buffer *cmdbuf, struct tu_query_pool *pool, uint32_t firstQuery, uint32_t queryCount)
+{
+   struct tu_cs *cs = &cmdbuf->cs;
+
+   reset_query_pool<CHIP>(pool, firstQuery, queryCount, [cs](uint64_t result_iova) {
+      tu_cs_emit_pkt7(cs, CP_MEM_WRITE, 4);
+      tu_cs_emit_qw(cs, result_iova);
+      tu_cs_emit_qw(cs, 0x0);
+   });
 }
 
 template <chip CHIP>
@@ -1066,6 +1070,7 @@ tu_CmdResetQueryPool(VkCommandBuffer commandBuffer,
 }
 TU_GENX(tu_CmdResetQueryPool);
 
+template <chip CHIP>
 VKAPI_ATTR void VKAPI_CALL
 tu_ResetQueryPool(VkDevice device,
                   VkQueryPool queryPool,
@@ -1074,39 +1079,12 @@ tu_ResetQueryPool(VkDevice device,
 {
    VK_FROM_HANDLE(tu_query_pool, pool, queryPool);
 
-   for (uint32_t i = 0; i < queryCount; i++) {
-      struct query_slot *slot = slot_address(pool, i + firstQuery);
-      slot->available = 0;
-
-      for (uint32_t k = 0; k < get_result_count(pool); k++) {
-         uint64_t *res;
-
-         if (is_perf_query_raw(pool)) {
-            res = query_result_addr(pool, i + firstQuery,
-                                    struct perfcntr_query_slot, k);
-         } else if (pool->vk.query_type == VK_QUERY_TYPE_OCCLUSION) {
-            assert(k == 0);
-            res = occlusion_query_addr(pool, i + firstQuery, result);
-         } else {
-            res = query_result_addr(pool, i + firstQuery, uint64_t, k);
-         }
-
-         *res = 0;
-      }
-
-      if (is_perf_query_derived(pool)) {
-         /* For perf queries with derived counters, we also zero out every used
-          * perfcntr's result field into which counter value deltas are accumulated.
-          */
-         struct tu_perf_query_derived *perf_query = &pool->perf_query.derived;
-
-         for (uint32_t j = 0; j < perf_query->collection->num_enabled_perfcntrs; ++j) {
-            uint64_t *perfcntr_res = perf_query_derived_perfcntr_addr(pool, i + firstQuery, result, j);
-            *perfcntr_res = 0;
-         }
-      }
-   }
+   reset_query_pool<CHIP>(pool, firstQuery, queryCount, [pool](uint64_t result_iova) {
+      uint64_t *result = (uint64_t *) ((char *) pool->bo->map + result_iova - pool->bo->iova);
+      *result = 0;
+   });
 }
+TU_GENX(tu_ResetQueryPool);
 
 template <chip CHIP>
 static void
@@ -1237,11 +1215,10 @@ emit_begin_stat_query(struct tu_cmd_buffer *cmdbuf,
 
    emit_counter_barrier<CHIP>(cs);
 
-   tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
-   tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(COUNTER_REG(IAVERTICES)) |
-                  CP_REG_TO_MEM_0_CNT(STAT_COUNT * 2) |
-                  CP_REG_TO_MEM_0_64B);
-   tu_cs_emit_qw(cs, begin_iova);
+   cs->reg_to_mem(begin_iova, COUNTER_REG(IAVERTICES), {
+      .cnt = STAT_COUNT * 2,
+      .is_64b = true,
+   });
 }
 
 template <chip CHIP>
@@ -1346,10 +1323,7 @@ emit_begin_perf_query_raw(struct tu_cmd_buffer *cmdbuf,
 
       uint64_t begin_iova = perf_query_iova(pool, query, begin, data->app_idx);
 
-      tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
-      tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(counter->counter_reg_lo) |
-                     CP_REG_TO_MEM_0_64B);
-      tu_cs_emit_qw(cs, begin_iova);
+      cs->reg_to_mem(begin_iova, {.reg = counter->counter_reg_lo}, {.is_64b = true});
    }
    tu_cond_exec_end(cs);
 }
@@ -1400,20 +1374,14 @@ emit_begin_perf_query_derived(struct tu_cmd_buffer *cmdbuf,
       if (i == 0 && perf_query->collection->cp_always_count_enabled)
          continue;
 
-      tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
-      tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(counter->counter_reg_lo) |
-                     CP_REG_TO_MEM_0_64B);
-      tu_cs_emit_qw(cs, begin_iova);
+      cs->reg_to_mem(begin_iova, {.reg = counter->counter_reg_lo}, {.is_64b = true});
    }
 
    if (perf_query->collection->cp_always_count_enabled) {
       const struct fd_perfcntr_counter *counter = perf_query->collection->enabled_perfcntrs[0].counter;
       uint64_t begin_iova = perf_query_derived_perfcntr_iova(pool, query, begin, 0);
 
-      tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
-      tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(counter->counter_reg_lo) |
-                     CP_REG_TO_MEM_0_64B);
-      tu_cs_emit_qw(cs, begin_iova);
+      cs->reg_to_mem(begin_iova, {.reg = counter->counter_reg_lo}, {.is_64b = true});
    }
 }
 
@@ -1464,11 +1432,10 @@ emit_begin_prim_generated_query(struct tu_cmd_buffer *cmdbuf,
 
    emit_counter_barrier<CHIP>(cs);
 
-   tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
-   tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(COUNTER_REG(CINVOCATIONS)) |
-                  CP_REG_TO_MEM_0_CNT(2) |
-                  CP_REG_TO_MEM_0_64B);
-   tu_cs_emit_qw(cs, begin_iova);
+   cs->reg_to_mem(begin_iova, COUNTER_REG(CINVOCATIONS), {
+      .cnt = 2,
+      .is_64b = true,
+   });
 
    if (cmdbuf->state.pass) {
       tu_cond_exec_end(cs);
@@ -1733,11 +1700,10 @@ emit_end_stat_query(struct tu_cmd_buffer *cmdbuf,
 
    emit_counter_barrier<CHIP>(cs);
 
-   tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
-   tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(COUNTER_REG(IAVERTICES)) |
-                  CP_REG_TO_MEM_0_CNT(STAT_COUNT * 2) |
-                  CP_REG_TO_MEM_0_64B);
-   tu_cs_emit_qw(cs, end_iova);
+   cs->reg_to_mem(end_iova, COUNTER_REG(IAVERTICES), {
+      .cnt = STAT_COUNT * 2,
+      .is_64b = true,
+   });
 
    for (int i = 0; i < STAT_COUNT; i++) {
       result_iova = query_result_iova(pool, query, uint64_t, i);
@@ -1802,10 +1768,9 @@ emit_end_perf_query_raw(struct tu_cmd_buffer *cmdbuf,
 
       end_iova = perf_query_iova(pool, query, end, data->app_idx);
 
-      tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
-      tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(counter->counter_reg_lo) |
-                     CP_REG_TO_MEM_0_64B);
-      tu_cs_emit_qw(cs, end_iova);
+      cs->reg_to_mem(end_iova, {.reg = counter->counter_reg_lo}, {
+         .is_64b = true,
+      });
    }
    tu_cond_exec_end(cs);
 
@@ -1882,10 +1847,9 @@ emit_end_perf_query_derived(struct tu_cmd_buffer *cmdbuf,
       const struct fd_perfcntr_counter *counter = perf_query->collection->enabled_perfcntrs[0].counter;
       uint64_t end_iova = perf_query_derived_perfcntr_iova(pool, query, end, 0);
 
-      tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
-      tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(counter->counter_reg_lo) |
-                     CP_REG_TO_MEM_0_64B);
-      tu_cs_emit_qw(cs, end_iova);
+      cs->reg_to_mem(end_iova, {.reg = counter->counter_reg_lo}, {
+         .is_64b = true,
+      });
    }
 
    for (uint32_t i = 0; i < perf_query->collection->num_enabled_perfcntrs; ++i) {
@@ -1895,10 +1859,9 @@ emit_end_perf_query_derived(struct tu_cmd_buffer *cmdbuf,
       if (i == 0 && perf_query->collection->cp_always_count_enabled)
          continue;
 
-      tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
-      tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(counter->counter_reg_lo) |
-                     CP_REG_TO_MEM_0_64B);
-      tu_cs_emit_qw(cs, end_iova);
+      cs->reg_to_mem(end_iova, {.reg = counter->counter_reg_lo}, {
+         .is_64b = true,
+      });
    }
 
    emit_counter_barrier<CHIP>(cs);
@@ -1986,6 +1949,8 @@ emit_end_xfb_query(struct tu_cmd_buffer *cmdbuf,
    tu_cs_emit_qw(cs, end_generated_iova);
    tu_cs_emit_qw(cs, begin_generated_iova);
 
+   tu_cs_emit_pkt7(cs, CP_WAIT_MEM_WRITES, 0);
+
    /* Set the availability to 1 */
    tu_cs_emit_pkt7(cs, CP_MEM_WRITE, 4);
    tu_cs_emit_qw(cs, available_iova);
@@ -2017,11 +1982,10 @@ emit_end_prim_generated_query(struct tu_cmd_buffer *cmdbuf,
 
    emit_counter_barrier<CHIP>(cs);
 
-   tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
-   tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(COUNTER_REG(CINVOCATIONS)) |
-                  CP_REG_TO_MEM_0_CNT(2) |
-                  CP_REG_TO_MEM_0_64B);
-   tu_cs_emit_qw(cs, end_iova);
+   cs->reg_to_mem(end_iova, COUNTER_REG(CINVOCATIONS), {
+      .cnt = 2,
+      .is_64b = true,
+   });
 
    tu_cs_emit_pkt7(cs, CP_MEM_TO_MEM, 9);
    tu_cs_emit(cs, CP_MEM_TO_MEM_0_DOUBLE | CP_MEM_TO_MEM_0_NEG_C |
@@ -2167,11 +2131,7 @@ tu_CmdWriteTimestamp2(VkCommandBuffer commandBuffer,
       emit_counter_barrier<CHIP>(cs);
    }
 
-   tu_cs_emit_pkt7(cs, CP_REG_TO_MEM, 3);
-   tu_cs_emit(cs, CP_REG_TO_MEM_0_REG(__CP_ALWAYS_ON_COUNTER<CHIP>({}).reg) |
-                  CP_REG_TO_MEM_0_CNT(2) |
-                  CP_REG_TO_MEM_0_64B);
-   tu_cs_emit_qw(cs, query_result_iova(pool, query, uint64_t, 0));
+   cs->reg_to_mem(query_result_iova(pool, query, uint64_t, 0), CP_ALWAYS_ON_COUNTER(CHIP));
 
    /* Only flag availability once the entire renderpass is done, similar to
     * the begin/end path.

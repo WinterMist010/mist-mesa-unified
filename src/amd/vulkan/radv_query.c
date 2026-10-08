@@ -48,22 +48,17 @@ gfx10_copy_shader_query_gfx(struct radv_cmd_buffer *cmd_buffer, bool use_gds, ui
    uint32_t src_sel;
    uint64_t src_va;
 
-   if (use_gds) {
-      /* Make sure GDS is idle before copying the value. */
-      cmd_buffer->state.flush_bits |= RADV_CMD_FLAG_PS_PARTIAL_FLUSH;
+   /* Make sure GE and/or GDS is idle before copying the value. */
+   cmd_buffer->state.flush_bits |= RADV_CMD_FLAG_VS_PARTIAL_FLUSH | RADV_CMD_FLAG_INV_L2;
+   radv_emit_cache_flush(cmd_buffer, false);
 
+   if (use_gds) {
       src_sel = COPY_DATA_GDS;
       src_va = src_offset;
    } else {
-      /* Make sure GE is idle before copying the value. */
-      cmd_buffer->state.flush_bits |= RADV_CMD_FLAG_VS_PARTIAL_FLUSH;
-
       src_sel = COPY_DATA_SRC_MEM;
       src_va = cmd_buffer->state.shader_query_buf_va + src_offset;
    }
-
-   cmd_buffer->state.flush_bits |= RADV_CMD_FLAG_INV_L2;
-   radv_emit_cache_flush(cmd_buffer);
 
    gfx10_copy_shader_query(cmd_buffer->cs, src_sel, src_va, dst_va);
 }
@@ -2474,14 +2469,7 @@ static void
 emit_query_flush(struct radv_cmd_buffer *cmd_buffer, struct radv_query_pool *pool)
 {
    if (cmd_buffer->pending_reset_query) {
-      if (pool->size >= RADV_BUFFER_OPS_CS_THRESHOLD) {
-         /* Only need to flush caches if the query pool size is
-          * large enough to be reset using the compute shader
-          * path. Small pools don't need any cache flushes
-          * because we use a CP dma clear.
-          */
-         radv_emit_cache_flush(cmd_buffer);
-      }
+      radv_emit_cache_flush(cmd_buffer, false);
    }
 }
 
@@ -2513,7 +2501,6 @@ radv_CmdCopyQueryPoolResultsToMemoryKHR(VkCommandBuffer commandBuffer, VkQueryPo
    VK_FROM_HANDLE(radv_query_pool, pool, queryPool);
    struct radv_device *device = radv_cmd_buffer_device(cmd_buffer);
    const struct radv_physical_device *pdev = radv_device_physical(device);
-   const struct radv_instance *instance = radv_physical_device_instance(pdev);
    struct radv_cmd_stream *cs = cmd_buffer->cs;
    const uint64_t dst_va = pDstRange->address;
    const uint64_t stride = pDstRange->stride;
@@ -2528,7 +2515,7 @@ radv_CmdCopyQueryPoolResultsToMemoryKHR(VkCommandBuffer commandBuffer, VkQueryPo
    /* Workaround engines that forget to properly specify WAIT_BIT because some driver implicitly
     * synchronizes before query copy.
     */
-   if (instance->drirc.debug.flush_before_query_copy)
+   if (pdev->drirc.debug.flush_before_query_copy)
       cmd_buffer->state.flush_bits |= cmd_buffer->active_query_flush_bits;
 
    /* From the Vulkan spec 1.1.108:
@@ -2691,8 +2678,9 @@ emit_end_query(struct radv_cmd_buffer *cmd_buffer, struct radv_query_pool *pool,
       UNREACHABLE("ending unhandled query type");
    }
 
-   cmd_buffer->active_query_flush_bits |=
-      RADV_CMD_FLAG_PS_PARTIAL_FLUSH | RADV_CMD_FLAG_CS_PARTIAL_FLUSH | RADV_CMD_FLAG_INV_L2 | RADV_CMD_FLAG_INV_VCACHE;
+   cmd_buffer->active_query_flush_bits |= RADV_CMD_FLAG_VS_PARTIAL_FLUSH | RADV_CMD_FLAG_PS_PARTIAL_FLUSH |
+                                          RADV_CMD_FLAG_CS_PARTIAL_FLUSH | RADV_CMD_FLAG_INV_L2 |
+                                          RADV_CMD_FLAG_INV_VCACHE;
    if (pdev->info.gfx_level >= GFX9) {
       cmd_buffer->active_query_flush_bits |= RADV_CMD_FLAG_FLUSH_AND_INV_CB | RADV_CMD_FLAG_FLUSH_AND_INV_DB;
    }
@@ -2785,7 +2773,6 @@ radv_CmdWriteTimestamp2(VkCommandBuffer commandBuffer, VkPipelineStageFlags2 sta
    VK_FROM_HANDLE(radv_query_pool, pool, queryPool);
    struct radv_device *device = radv_cmd_buffer_device(cmd_buffer);
    const struct radv_physical_device *pdev = radv_device_physical(device);
-   const struct radv_instance *instance = radv_physical_device_instance(pdev);
    const unsigned num_queries = MAX2(util_bitcount(cmd_buffer->state.render.view_mask), 1);
    struct radv_cmd_stream *cs = cmd_buffer->cs;
    const uint64_t va = radv_buffer_get_va(pool->bo);
@@ -2794,7 +2781,7 @@ radv_CmdWriteTimestamp2(VkCommandBuffer commandBuffer, VkPipelineStageFlags2 sta
    radv_cs_add_buffer(device->ws, cs->b, pool->bo);
 
    if (cmd_buffer->qf == RADV_QUEUE_TRANSFER) {
-      if (instance->drirc.debug.flush_before_timestamp_write) {
+      if (pdev->drirc.debug.flush_before_timestamp_write) {
          radv_sdma_emit_nop(device, cs);
       }
 
@@ -2813,12 +2800,13 @@ radv_CmdWriteTimestamp2(VkCommandBuffer commandBuffer, VkPipelineStageFlags2 sta
       return;
    }
 
-   if (instance->drirc.debug.flush_before_timestamp_write) {
+   if (pdev->drirc.debug.flush_before_timestamp_write) {
       /* Make sure previously launched waves have finished */
-      cmd_buffer->state.flush_bits |= RADV_CMD_FLAG_PS_PARTIAL_FLUSH | RADV_CMD_FLAG_CS_PARTIAL_FLUSH;
+      cmd_buffer->state.flush_bits |=
+         RADV_CMD_FLAG_VS_PARTIAL_FLUSH | RADV_CMD_FLAG_PS_PARTIAL_FLUSH | RADV_CMD_FLAG_CS_PARTIAL_FLUSH;
    }
 
-   radv_emit_cache_flush(cmd_buffer);
+   radv_emit_cache_flush(cmd_buffer, false);
 
    ASSERTED unsigned cdw_max = radeon_check_space(device->ws, cs->b, 28 * num_queries);
 
@@ -2827,8 +2815,9 @@ radv_CmdWriteTimestamp2(VkCommandBuffer commandBuffer, VkPipelineStageFlags2 sta
       query_va += pool->stride;
    }
 
-   cmd_buffer->active_query_flush_bits |=
-      RADV_CMD_FLAG_PS_PARTIAL_FLUSH | RADV_CMD_FLAG_CS_PARTIAL_FLUSH | RADV_CMD_FLAG_INV_L2 | RADV_CMD_FLAG_INV_VCACHE;
+   cmd_buffer->active_query_flush_bits |= RADV_CMD_FLAG_VS_PARTIAL_FLUSH | RADV_CMD_FLAG_PS_PARTIAL_FLUSH |
+                                          RADV_CMD_FLAG_CS_PARTIAL_FLUSH | RADV_CMD_FLAG_INV_L2 |
+                                          RADV_CMD_FLAG_INV_VCACHE;
    if (pdev->info.gfx_level >= GFX9) {
       cmd_buffer->active_query_flush_bits |= RADV_CMD_FLAG_FLUSH_AND_INV_CB | RADV_CMD_FLAG_FLUSH_AND_INV_DB;
    }
@@ -2850,7 +2839,7 @@ radv_CmdWriteAccelerationStructuresPropertiesKHR(VkCommandBuffer commandBuffer, 
 
    radv_cs_add_buffer(device->ws, cs->b, pool->bo);
 
-   radv_emit_cache_flush(cmd_buffer);
+   radv_emit_cache_flush(cmd_buffer, false);
 
    ASSERTED unsigned cdw_max = radeon_check_space(device->ws, cs->b, 6 * accelerationStructureCount);
 
