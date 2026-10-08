@@ -1918,7 +1918,9 @@ tu_autotune::get_optimal_mode(struct tu_cmd_buffer *cmd_buffer, rp_ctx_t *rp_ctx
       bool big_gmem_applicable =
          config.test(mod_flag::BIG_GMEM) && rp_state->drawcall_count >= 10 &&
          (max_tile_count_big_gmem == 0 || tile_count <= max_tile_count_big_gmem);
-      if (big_gmem_applicable || config.is_enabled(algorithm::PREFER_GMEM))
+      
+      if (big_gmem_applicable) {
+         early_return_reason = "BIG_GMEM applicable";
          return render_mode::GMEM;
       }
       if (config.is_enabled(algorithm::PREFER_GMEM)) {
