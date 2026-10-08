@@ -474,8 +474,11 @@ lower_ssbo_ubo_intrinsic(struct tu_device *dev,
    if (nir_scalar_is_const(scalar_idx)) {
       bool can_speculate_descriptor = intrin->instr.pass_flags;
       nir_def *bindless =
-         bindless_resource_ir3(b, nir_scalar_as_uint(scalar_idx),
-                               descriptor_idx, can_speculate_descriptor);
+         nir_bindless_resource_ir3(b, 32, descriptor_idx,
+                                   .desc_set = nir_scalar_as_uint(scalar_idx),
+                                   .access = can_speculate_descriptor ?
+                                   ACCESS_CAN_SPECULATE :
+                                   (gl_access_qualifier)0);
       nir_src_rewrite(&intrin->src[buffer_src], bindless);
       return true;
    }

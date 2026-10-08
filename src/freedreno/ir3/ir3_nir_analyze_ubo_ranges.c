@@ -65,6 +65,7 @@ get_ubo_info(nir_intrinsic_instr *instr, struct ir3_ubo_info *ubo)
          return true;
       }
    }
+   ubo->can_speculate = nir_intrinsic_access(instr) & ACCESS_CAN_SPECULATE;
    return false;
 }
 
@@ -434,7 +435,7 @@ copy_global_to_uniform(nir_shader *nir, struct ir3_ubo_analysis_state *state)
       for (unsigned offset = 0; offset < size; offset += 256 * 16) {
          unsigned const_offset = range->offset / 4 + offset / 4;
          nir_copy_global_to_uniform_ir3(
-            b, base, .access = range->can_speculate ? ACCESS_CAN_SPECULATE : 0,
+            b, base, .access = range->ubo.can_speculate ? ACCESS_CAN_SPECULATE : 0,
             .base = start + offset, .range_base = const_offset,
             .range = MIN2(256, (size - offset) / 16));
       }
@@ -460,7 +461,7 @@ copy_ubo_to_uniform(nir_shader *nir, const struct ir3_const_state *const_state)
 
       nir_def *ubo = nir_imm_int(b, range->ubo.block);
       enum gl_access_qualifier access =
-         range->can_speculate ? ACCESS_CAN_SPECULATE : 0;
+         range->ubo.can_speculate ? ACCESS_CAN_SPECULATE : 0;
       if (range->ubo.bindless) {
          ubo = nir_bindless_resource_ir3(b, 32, ubo,
                                          .access = access,
@@ -497,7 +498,9 @@ instr_is_load_ubo(nir_instr *instr)
    if (op != nir_intrinsic_load_ubo)
       return false;
 
-   return ir3_nir_is_prefetchable(nir_instr_as_intrinsic(instr));
+   return instr->block->cf_node.parent->type == nir_cf_node_function ||
+      (nir_intrinsic_access(nir_instr_as_intrinsic(instr)) &
+       ACCESS_CAN_SPECULATE);
 }
 
 bool

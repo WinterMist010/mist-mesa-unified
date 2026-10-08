@@ -46,6 +46,10 @@ def declare_options():
           "Disable conservative LRZ",
           c_name="disable_conservative_lrz"),
 
+        B("tu_disable_lrz", False,
+          "Disable LRZ entirely, equivalent to TU_DEBUG=nolrz but selectable per-application via drirc",
+          c_name="disable_lrz"),
+
         B("tu_dont_reserve_descriptor_set", False,
           "Don't internally reserve one of the HW descriptor sets for descriptor set dynamic offset support, this frees up an extra descriptor set at the cost of that feature",
           c_name="dont_reserve_descriptor_set"),
@@ -77,6 +81,8 @@ def declare_options():
         # fast border color HW feature results in an incorrect color being used.
         # However, we want to enable fast border colors for apps that are known
         # not to use border colors with D24S8, such as DXVK and vkd3d-proton.
+        # For those engines this is also enabled by default at runtime (see
+        # tu_sampler.cc); this option covers any other app.
         B("tu_enable_fast_border_color_for_undefined_formats", False,
           "Enables fast border color HW feature for VK_FORMAT_UNDEFINED sampler formats.",
           c_name="enable_fast_border_color_for_undefined_formats"),

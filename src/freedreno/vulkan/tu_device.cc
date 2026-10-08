@@ -975,10 +975,29 @@ tu_get_features(struct tu_physical_device *pdevice,
    features->bufferDeviceAddressAllocationAlignment = true;
 }
 
+static VkSampleCountFlags
+tu_get_sample_counts(const struct tu_physical_device *pdevice)
+{
+   /* Device-specific MSAA limit comes from fd_dev_info::props::max_samples
+    * (0 = default), capped to the number of samples the driver actually
+    * implements.  Keep the default in sync with
+    * nir_shader_compiler_options::max_samples (ir3_compiler.c).
+    */
+   unsigned max_samples = 4;
+   if (pdevice->info->props.max_samples)
+      max_samples = MIN2(max_samples, pdevice->info->props.max_samples);
+
+   VkSampleCountFlags counts = VK_SAMPLE_COUNT_1_BIT;
+   for (unsigned samples = 2; samples <= max_samples; samples <<= 1)
+      counts |= samples;
+   return counts;
+}
+
 static void
 tu_get_physical_device_properties_1_1(struct tu_physical_device *pdevice,
                                       struct vk_properties *p)
 {
+   const VkSampleCountFlags sample_counts = tu_get_sample_counts(pdevice);
    memcpy(p->deviceUUID, pdevice->device_uuid, VK_UUID_SIZE);
    memcpy(p->driverUUID, pdevice->driver_uuid, VK_UUID_SIZE);
    memset(p->deviceLUID, 0, VK_LUID_SIZE);
@@ -1018,15 +1037,13 @@ tu_get_physical_device_properties_1_1(struct tu_physical_device *pdevice,
 
 
 static const size_t max_descriptor_set_size = MAX_SET_SIZE / (4 * FDL6_TEX_CONST_DWORDS);
-static const VkSampleCountFlags sample_counts =
-   VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_2_BIT | VK_SAMPLE_COUNT_4_BIT;
-static const VkSampleCountFlags sample_location_counts =
-   VK_SAMPLE_COUNT_2_BIT | VK_SAMPLE_COUNT_4_BIT; /* Note: update nir_shader_compiler_options.max_samples when changing this. */
 
 static void
 tu_get_physical_device_properties_1_2(struct tu_physical_device *pdevice,
                                       struct vk_properties *p)
 {
+   const VkSampleCountFlags sample_counts = tu_get_sample_counts(pdevice);
+
    p->driverID = VK_DRIVER_ID_MESA_TURNIP;
    memset(p->driverName, 0, sizeof(p->driverName));
    snprintf(p->driverName, VK_MAX_DRIVER_NAME_SIZE,
@@ -1040,6 +1057,12 @@ tu_get_physical_device_properties_1_2(struct tu_physical_device *pdevice,
       .subminor = 6,
       .patch = 1,
    };
+
+   if (TU_DEBUG(DECK_EMU)) {
+      p->driverID = VK_DRIVER_ID_MESA_RADV;
+      memset(p->driverName, 0, sizeof(p->driverName));
+      snprintf(p->driverName, VK_MAX_DRIVER_NAME_SIZE, "radv");
+   }
 
    if (TU_DEBUG(DECK_EMU)) {
       p->driverID = VK_DRIVER_ID_MESA_RADV;
@@ -1121,7 +1144,7 @@ tu_get_physical_device_properties_1_2(struct tu_physical_device *pdevice,
 
    p->maxTimelineSemaphoreValueDifference = UINT64_MAX;
 
-   p->framebufferIntegerColorSampleCounts = sample_counts;
+   p->framebufferIntegerColorSampleCounts = tu_get_sample_counts(pdevice);
 }
 
 static void
@@ -1303,15 +1326,15 @@ tu_get_properties(struct tu_physical_device *pdevice,
    props->maxFramebufferWidth = (1 << 14);
    props->maxFramebufferHeight = (1 << 14);
    props->maxFramebufferLayers = (1 << (pdevice->info->props.is_a702 ? 8 : 10));
-   props->framebufferColorSampleCounts = sample_counts;
-   props->framebufferDepthSampleCounts = sample_counts;
-   props->framebufferStencilSampleCounts = sample_counts;
-   props->framebufferNoAttachmentsSampleCounts = sample_counts;
+   props->framebufferColorSampleCounts = tu_get_sample_counts(pdevice);
+   props->framebufferDepthSampleCounts = tu_get_sample_counts(pdevice);
+   props->framebufferStencilSampleCounts = tu_get_sample_counts(pdevice);
+   props->framebufferNoAttachmentsSampleCounts = tu_get_sample_counts(pdevice);
    props->maxColorAttachments = MAX_RTS;
-   props->sampledImageColorSampleCounts = sample_counts;
-   props->sampledImageIntegerSampleCounts = sample_counts;
-   props->sampledImageDepthSampleCounts = sample_counts;
-   props->sampledImageStencilSampleCounts = sample_counts;
+   props->sampledImageColorSampleCounts = tu_get_sample_counts(pdevice);
+   props->sampledImageIntegerSampleCounts = tu_get_sample_counts(pdevice);
+   props->sampledImageDepthSampleCounts = tu_get_sample_counts(pdevice);
+   props->sampledImageStencilSampleCounts = tu_get_sample_counts(pdevice);
    props->storageImageSampleCounts = VK_SAMPLE_COUNT_1_BIT;
    props->maxSampleMaskWords = 1;
    props->timestampComputeAndGraphics = true;
@@ -1435,7 +1458,9 @@ tu_get_properties(struct tu_physical_device *pdevice,
 
    /* VK_EXT_sample_locations */
    props->sampleLocationSampleCounts =
-      pdevice->vk.supported_extensions.EXT_sample_locations ? sample_location_counts : 0;
+      pdevice->vk.supported_extensions.EXT_sample_locations ?
+         (tu_get_sample_counts(pdevice) &
+          (VK_SAMPLE_COUNT_2_BIT | VK_SAMPLE_COUNT_4_BIT)) : 0;
    props->maxSampleLocationGridSize = (VkExtent2D) { 1 , 1 };
    props->sampleLocationCoordinateRange[0] = SAMPLE_LOCATION_MIN;
    props->sampleLocationCoordinateRange[1] = SAMPLE_LOCATION_MAX;
@@ -2047,6 +2072,14 @@ tu_CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
       tu_physical_device_try_create;
    instance->vk.physical_devices.enumerate = tu_enumerate_devices;
    instance->vk.physical_devices.destroy = tu_destroy_physical_device;
+
+   /* Engine detection, same pattern as ANV (see anv_instance.c): DXVK
+    * reports engineName "DXVK", vkd3d-proton reports "vkd3d-proton".
+    */
+   const char *engine_name = instance->vk.app_info.engine_name;
+   instance->is_dxvk = engine_name && !strcmp(engine_name, "DXVK");
+   instance->is_vkd3d_proton =
+      engine_name && !strcmp(engine_name, "vkd3d-proton");
 
    instance->instance_idx = p_atomic_fetch_add(&instance_count, 1);
    if (TU_DEBUG(STARTUP))
@@ -3272,7 +3305,8 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
       physical_device->info->props.has_z24uint_s8uint &&
       (!border_color_without_format ||
        !physical_device->instance->drirc.misc.enable_d24s8_border_color_workaround);
-   device->use_lrz = !TU_DEBUG_START(NOLRZ);
+   device->use_lrz = !TU_DEBUG_START(NOLRZ) &&
+                     !physical_device->instance->drirc.misc.disable_lrz;
 
    tu_gpu_tracepoint_config_variable();
 
@@ -4536,7 +4570,9 @@ tu_GetPhysicalDeviceMultisamplePropertiesEXT(
 {
    VK_FROM_HANDLE(tu_physical_device, pdevice, physicalDevice);
 
-   if (pdevice->vk.supported_extensions.EXT_sample_locations && (samples & sample_location_counts))
+   if (pdevice->vk.supported_extensions.EXT_sample_locations &&
+       (samples & tu_get_sample_counts(pdevice) &
+        (VK_SAMPLE_COUNT_2_BIT | VK_SAMPLE_COUNT_4_BIT)))
       pMultisampleProperties->maxSampleLocationGridSize = (VkExtent2D){ 1, 1 };
    else
       pMultisampleProperties->maxSampleLocationGridSize = (VkExtent2D){ 0, 0 };

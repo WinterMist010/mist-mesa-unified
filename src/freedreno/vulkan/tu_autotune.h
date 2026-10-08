@@ -38,6 +38,17 @@ struct tu_autotune {
 
    uint32_t supported_mod_flags;
 
+   /* Device-specific autotune tuning knobs, sourced from the physical device
+    * props at construction time.  These allow the autotuner to account for
+    * dies with a small dedicated GMEM (e.g. A810/812's 576 KiB) where the
+    * high tile count induced by the small GMEM changes the SYSMEM/GMEM
+    * tradeoff.  The defaults are no-ops (zero / 100 / zero) so that
+    * non-opted-in devices behave exactly as before.
+    */
+   uint32_t gmem_tile_overhead_bytes = 0;
+   uint32_t gmem_margin_percent = 100;
+   uint32_t max_tile_count_big_gmem = 0;
+
    /* Allows for thread-safe access to the configurations. */
    struct atomic_config_t {
     private:

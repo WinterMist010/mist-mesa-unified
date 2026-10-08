@@ -2117,11 +2117,10 @@ ir3_nir_get_global_offset(nir_builder *b, struct ir3_compiler *compiler,
    };
 }
 
-/* Early preamble may execute even if no shader invocations are dynamically
- * executed. In order for this to be safe, every instruction must be
- * speculatable, i.e. it cannot cause faults no matter what data the user throws
- * at it. Generally this means descriptors are in-bounds and (if loading from
- * descriptors) they contain valid data.
+/* Early preamble may execute even if the shader doesn't. In order for this to
+ * be safe, every instruction must be speculatable, i.e. it cannot cause faults
+ * no matter what data the user throws at it. Generally this means descriptors
+ * are in-bounds and (if loading from descriptors) they contain valid data.
  */
 
 bool
