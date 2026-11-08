@@ -1458,25 +1458,25 @@ a8xx_gen2 = GPUProps(
 )
 
 a8xx_810 = GPUProps(
-    # Sysmem VPC buffer layout (standardized across Gen8 for vertex reuse)
-    sysmem_vpc_attr_buf_size = 131072,  # 128 KiB
-    sysmem_vpc_pos_buf_size  = 65536,   # 64 KiB
-    sysmem_vpc_bv_pos_buf_size = 32768, # 32 KiB
+    # Sysmem VPC buffer layout, from blob
+    sysmem_vpc_attr_buf_size = 49152,  # 128 KiB
+    sysmem_vpc_pos_buf_size  = 16384,   # 16 KiB
+    sysmem_vpc_bv_pos_buf_size = 20480, # 20 KiB
 
-    # Sysmem CCU cache sizing tuned to prevent integer underflows in Freedreno tiling calculations
+    # Sysmem CCU cache sizing tuned to blob
     sysmem_ccu_color_cache_fraction = CCUColorCacheFraction.FULL.value,
-    sysmem_per_ccu_color_cache_size = 32 * 1024,
+    sysmem_per_ccu_color_cache_size = 64 * 1024,
     sysmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value, #?. Whitebelyash uses this instead of three_quarter, havent tested correctness.
-    sysmem_per_ccu_depth_cache_size = 32 * 1024,
+    sysmem_per_ccu_depth_cache_size = 128 * 1024,
 
     # GMEM VPC buffer layout:
-    # Lean 24K / 12K / 16K footprint saves ~52 KiB vs 48K/24K/32K,
-    # freeing precious GMEM for larger tile dimensions on 576 KiB hardware.
-    gmem_vpc_attr_buf_size   = 24576,   # 24 KiB
-    gmem_vpc_pos_buf_size    = 12288,   # 12 KiB
-    gmem_vpc_bv_pos_buf_size = 16384,   # 16 KiB
+    # Adjusted to blob values
+    # Unknown how this affects per CCU values
+    gmem_vpc_attr_buf_size   = 49152,   # 48 KiB
+    gmem_vpc_pos_buf_size    = 24576,   # 24 KiB
+    gmem_vpc_bv_pos_buf_size = 20480,   # 20 KiB
 
-    # GMEM CCU cache fractions matching A810 hardware cache partitions
+    # GMEM CCU cache fracctions matching A810 hardware cache partitions
     gmem_ccu_color_cache_fraction = CCUColorCacheFraction.EIGHTH.value,
     gmem_per_ccu_color_cache_size = 16 * 1024,
     gmem_ccu_depth_cache_fraction = CCUColorCacheFraction.FULL.value,
